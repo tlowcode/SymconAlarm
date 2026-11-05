@@ -6,6 +6,8 @@ Alarmanlage als IP-Symcon-Modul (ab Symcon 7.0) für KNX-Kontakte, Bewegungsmeld
 
 - **Scharf (Abwesend):** automatisch, wenn alle Personen eine einstellbare Zeit abwesend sind. Kontakte und Bewegungsmelder lösen nach der Eingangsverzögerung Alarm aus. Heimkommen schaltet unscharf, auch während des Voralarms.
 - **Scharf (Nacht):** über den KNX „Scharf Request“ (1). Kontaktöffnung startet einen Voralarm; Bewegung während des Voralarms löst sofort den vollen Alarm aus. Bewegung ohne vorherige Kontaktöffnung wird ignoriert. Request 0 schaltet unscharf.
+- **ekey Fingerscanner:** Ein berechtigter Fingerabdruck (Benutzer-ID plus Finger-ID oder jeder Finger des Benutzers, optional geprüfte Aktion) schaltet „Abwesend“ unscharf, auch während Voralarm und Alarm. Nicht berechtigte Fingerabdrücke werden gemeldet.
+- Ein zweiter, anderer Auslöser während des Voralarms bricht diesen ab und löst sofort den vollen Alarm mit Sirene aus.
 - Beim Schärfen offene Kontakte werden ausgeklammert (Push mit Liste) und ab dem Schließen überwacht.
 - Alarmstufen: Voralarm (Push, optional Orientierungslicht) → Alarm (Licht 100 %, Rollläden auf, Push) → Sirene → Sirene aus nach einstellbarer Dauer, Alarmzustand bleibt bis unscharf.
 - Status „System Armed“ wird an KNX zurückgemeldet.

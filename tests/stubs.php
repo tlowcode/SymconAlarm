@@ -21,10 +21,11 @@ class Sim
     public static array $actions = [];  // Protokoll aller RequestAction-Aufrufe
     public static array $pushes = [];
     public static ?IPSModule $module = null;
+    public static int $now = 1000000;
 
     public static function addVar(int $id, string $name, int $type, $value, string $profile = ''): void
     {
-        self::$vars[$id] = ['name' => $name, 'type' => $type, 'value' => $value, 'profile' => $profile];
+        self::$vars[$id] = ['name' => $name, 'type' => $type, 'value' => $value, 'profile' => $profile, 'updated' => 0];
     }
 
     public static function reset(): void
@@ -38,6 +39,7 @@ class Sim
     {
         $old = self::$vars[$id]['value'];
         self::$vars[$id]['value'] = $value;
+        self::$vars[$id]['updated'] = self::$now;
         if (self::$module && in_array($id, self::$module->watched, true)) {
             self::$module->MessageSink(time(), $id, VM_UPDATE, [$value, $old !== $value, $old]);
         }
@@ -117,7 +119,7 @@ function IPS_GetName($id) { return Sim::$vars[$id]['name']; }
 function IPS_GetVariable($id)
 {
     $v = Sim::$vars[$id];
-    return ['VariableType' => $v['type'], 'VariableProfile' => $v['profile'], 'VariableCustomProfile' => ''];
+    return ['VariableType' => $v['type'], 'VariableProfile' => $v['profile'], 'VariableCustomProfile' => '', 'VariableUpdated' => $v['updated']];
 }
 function IPS_VariableProfileExists($n) { return isset(Sim::$profiles[$n]); }
 function IPS_GetVariableProfile($n) { return Sim::$profiles[$n]; }

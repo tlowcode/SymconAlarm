@@ -107,6 +107,68 @@
         },
         {
             "type": "ExpansionPanel",
+            "caption": "ekey Fingerscanner (entschärft \"Abwesend\")",
+            "items": [
+                {
+                    "type": "SelectVariable",
+                    "name": "EkeyUserVariableID",
+                    "caption": "Variable Benutzer-ID der ekey-Instanz"
+                },
+                {
+                    "type": "SelectVariable",
+                    "name": "EkeyFingerVariableID",
+                    "caption": "Variable Finger-ID der ekey-Instanz"
+                },
+                {
+                    "type": "SelectVariable",
+                    "name": "EkeyActionVariableID",
+                    "caption": "Variable Aktion (optional)"
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "EkeyActionValue",
+                    "caption": "Wert der Aktion bei erkanntem Finger"
+                },
+                {
+                    "type": "List",
+                    "name": "EkeyUsers",
+                    "caption": "Berechtigte Fingerabdrücke",
+                    "rowCount": 6,
+                    "add": true,
+                    "delete": true,
+                    "columns": [
+                        {
+                            "caption": "Benutzer-ID",
+                            "name": "UserID",
+                            "width": "150px",
+                            "add": 1,
+                            "edit": { "type": "NumberSpinner" }
+                        },
+                        {
+                            "caption": "Finger-ID (-1 = jeder Finger)",
+                            "name": "FingerID",
+                            "width": "220px",
+                            "add": -1,
+                            "edit": { "type": "NumberSpinner", "minimum": -1 }
+                        },
+                        {
+                            "caption": "Name",
+                            "name": "Name",
+                            "width": "auto",
+                            "add": "",
+                            "edit": { "type": "ValidationTextBox" }
+                        }
+                    ]
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "EkeyNotifyRejected",
+                    "caption": "Push bei nicht berechtigtem Fingerabdruck, solange scharf"
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
             "caption": "Aktoren",
             "items": [
                 {

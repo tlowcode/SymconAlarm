@@ -8,6 +8,7 @@ require __DIR__ . '/../Alarmanlage/module.php';
 const DOOR = 101, WINDOW = 102, MOTION_WZ = 201, MOTION_FLUR = 202;
 const THILO = 301, NADINE = 302, REQUEST = 401, ARMED = 402;
 const SIREN = 501, LIGHT = 601, DIMMER = 602, SHUTTER = 701;
+const EKEY_USER = 801, EKEY_FINGER = 802, EKEY_ACTION = 803;
 
 $failures = 0;
 function check(string $label, bool $ok): void
@@ -36,6 +37,9 @@ function setup(): Alarmanlage
     Sim::addVar(LIGHT, 'Licht', VARIABLETYPE_BOOLEAN, false);
     Sim::addVar(DIMMER, 'Licht Helligkeit', VARIABLETYPE_INTEGER, 0, 'Hue.Brightness');
     Sim::addVar(SHUTTER, 'Rollladen', VARIABLETYPE_BOOLEAN, true);
+    Sim::addVar(EKEY_USER, 'Benutzer ID', VARIABLETYPE_INTEGER, 0);
+    Sim::addVar(EKEY_FINGER, 'Finger ID', VARIABLETYPE_INTEGER, 0);
+    Sim::addVar(EKEY_ACTION, 'Aktion', VARIABLETYPE_INTEGER, 0);
 
     $m = new Alarmanlage();
     $m->Create();
@@ -48,11 +52,33 @@ function setup(): Alarmanlage
         'Sirens'                => json_encode([['VariableID' => SIREN]]),
         'AlarmLights'           => json_encode([['SwitchVariableID' => LIGHT, 'BrightnessVariableID' => DIMMER]]),
         'Shutters'              => json_encode([['VariableID' => SHUTTER, 'OpenValue' => 0]]),
+        'EkeyUserVariableID'    => EKEY_USER,
+        'EkeyFingerVariableID'  => EKEY_FINGER,
+        'EkeyActionVariableID'  => EKEY_ACTION,
+        'EkeyUsers'             => json_encode([
+            ['UserID' => 1, 'FingerID' => 3, 'Name' => 'Thilo'],
+            ['UserID' => 2, 'FingerID' => -1, 'Name' => 'Nadine'],
+        ]),
         'VisuID'                => 77777,
         'TestMode'              => false,
     ]);
     $m->ApplyChanges();
     return $m;
+}
+
+function scan(int $user, int $finger, int $action = 1): void
+{
+    Sim::$now += 10;
+    Sim::update(EKEY_USER, $user);
+    Sim::update(EKEY_FINGER, $finger);
+    Sim::update(EKEY_ACTION, $action);
+}
+
+function armAway(): void
+{
+    Sim::update(THILO, false);
+    Sim::update(NADINE, false);
+    Sim::fireTimer();
 }
 
 function mode(Alarmanlage $m): int { return $m->values['Mode']; }
@@ -61,7 +87,7 @@ function state(Alarmanlage $m): int { return $m->values['State']; }
 echo "Konfiguration\n";
 $m = setup();
 check('Status 102 (bereit)', $m->status === 102);
-check('Alle Sensoren und Scharf Request abonniert', count($m->watched) === 7);
+check('Alle Sensoren, Scharf Request und ekey abonniert', count($m->watched) === 10);
 
 echo "Abwesend: offenes Fenster wird ausgeklammert und später überwacht\n";
 $m = setup();
@@ -173,6 +199,57 @@ Sim::update(REQUEST, true);
 $m->properties['Contacts'] = json_encode([['VariableID' => DOOR], ['VariableID' => WINDOW], ['VariableID' => 103]]);
 $m->ApplyChanges();
 check('Neuer offener Kontakt ausgeklammert', $m->values['Excluded'] === 'Fenster Bad');
+
+echo "Zweiter Auslöser im Voralarm\n";
+$m = setup();
+armAway();
+Sim::update(DOOR, true);
+Sim::update(DOOR, false);
+Sim::update(DOOR, true);
+check('Gleicher Kontakt erneut: weiter Voralarm', state($m) === 1);
+Sim::update(WINDOW, true);
+check('Anderer Kontakt: sofort voller Alarm mit Sirene', state($m) === 3 && Sim::$vars[SIREN]['value'] === true);
+check('Rollladen auf', Sim::$vars[SHUTTER]['value'] === false);
+
+$m = setup();
+armAway();
+Sim::update(DOOR, true);
+Sim::update(MOTION_FLUR, true);
+check('Kontakt, dann Bewegung im Modus Abwesend: voller Alarm', state($m) === 3);
+
+echo "ekey\n";
+$m = setup();
+armAway();
+scan(1, 4);
+check('Falscher Finger: bleibt scharf', mode($m) === 1);
+check('Push bei nicht berechtigtem Finger', (bool) preg_grep('/Nicht berechtigter Fingerabdruck \(Benutzer 1, Finger 4\)/', Sim::$pushes));
+scan(1, 3, 2);
+check('Richtiger Finger, aber Aktion = Ablehnung: bleibt scharf', mode($m) === 1);
+Sim::update(DOOR, true);
+scan(1, 3);
+check('Thilo Finger 3 im Voralarm: unscharf', mode($m) === 0 && state($m) === 0);
+
+$m = setup();
+armAway();
+scan(2, 7);
+check('Nadine mit beliebigem Finger: unscharf', mode($m) === 0);
+$m->ArmAway();
+scan(2, 7);
+check('Gleicher Scan erneut: wieder unscharf', mode($m) === 0);
+
+$m = setup();
+armAway();
+Sim::$now += 10;
+Sim::update(EKEY_USER, 1);
+check('Nur Benutzer-ID aktualisiert: noch keine Auswertung', mode($m) === 1);
+Sim::update(EKEY_FINGER, 3);
+Sim::update(EKEY_ACTION, 1);
+check('Nach vollständigem Scan: unscharf', mode($m) === 0);
+
+$m = setup();
+Sim::update(REQUEST, true);
+scan(1, 3);
+check('Nachtmodus bleibt bei Fingerabdruck scharf', mode($m) === 2);
 
 echo $failures === 0 ? "\nAlle Tests bestanden.\n" : "\n$failures Test(s) fehlgeschlagen.\n";
 exit($failures === 0 ? 0 : 1);

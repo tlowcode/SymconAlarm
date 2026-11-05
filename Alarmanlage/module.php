@@ -31,6 +31,13 @@ class Alarmanlage extends IPSModule
         $this->RegisterPropertyInteger('ArmedStatusVariableID', 0);
         $this->RegisterPropertyBoolean('RequestCanDisarmAway', false);
 
+        $this->RegisterPropertyInteger('EkeyUserVariableID', 0);
+        $this->RegisterPropertyInteger('EkeyFingerVariableID', 0);
+        $this->RegisterPropertyInteger('EkeyActionVariableID', 0);
+        $this->RegisterPropertyInteger('EkeyActionValue', 1);
+        $this->RegisterPropertyString('EkeyUsers', '[]');
+        $this->RegisterPropertyBoolean('EkeyNotifyRejected', true);
+
         $this->RegisterPropertyString('Sirens', '[]');
         $this->RegisterPropertyString('AlarmLights', '[]');
         $this->RegisterPropertyString('PreAlarmLights', '[]');
@@ -49,6 +56,7 @@ class Alarmanlage extends IPSModule
         $this->RegisterAttributeString('ActiveContacts', '[]');
         $this->RegisterAttributeString('PendingContacts', '[]');
         $this->RegisterAttributeString('NextStep', '');
+        $this->RegisterAttributeString('LastEkeyScan', '');
 
         $this->RegisterTimer('StepTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'TimerElapsed\', 0);');
 
@@ -86,7 +94,8 @@ class Alarmanlage extends IPSModule
             array_keys($this->contacts()),
             array_keys($this->motionSensors()),
             array_keys($this->presence()),
-            [$this->ReadPropertyInteger('ArmRequestVariableID')]
+            [$this->ReadPropertyInteger('ArmRequestVariableID')],
+            $this->ekeyIDs()
         );
         foreach ($watch as $id) {
             if ($id <= 0) {
@@ -226,6 +235,11 @@ class Alarmanlage extends IPSModule
             $this->onArmRequest((bool) $value);
             return;
         }
+        if (in_array($id, $this->ekeyIDs(), true)) {
+            // Gleicher Finger zweimal hintereinander liefert dieselben Werte, daher jede Aktualisierung
+            $this->onEkeyUpdate();
+            return;
+        }
         if (!$changed) {
             return;
         }
@@ -312,6 +326,48 @@ class Alarmanlage extends IPSModule
         $this->setTimer('armAway', $delay);
     }
 
+    private function onEkeyUpdate(): void
+    {
+        if ($this->ReadPropertyInteger('EkeyUserVariableID') <= 0 || $this->ReadPropertyInteger('EkeyFingerVariableID') <= 0) {
+            return;
+        }
+        $ids = $this->ekeyIDs();
+
+        // Ein Scan aktualisiert alle ekey-Variablen nacheinander; erst auswerten, wenn alle frisch sind
+        $stamps = array_map(fn ($id) => IPS_GetVariable($id)['VariableUpdated'], $ids);
+        if (max($stamps) - min($stamps) > 2) {
+            return;
+        }
+        $values = array_map(fn ($id) => (string) GetValue($id), $ids);
+        $scanKey = implode(':', array_merge($stamps, $values));
+        if ($scanKey === $this->ReadAttributeString('LastEkeyScan')) {
+            return;
+        }
+        $this->WriteAttributeString('LastEkeyScan', $scanKey);
+
+        $user = (int) GetValue($this->ReadPropertyInteger('EkeyUserVariableID'));
+        $finger = (int) GetValue($this->ReadPropertyInteger('EkeyFingerVariableID'));
+        $actionID = $this->ReadPropertyInteger('EkeyActionVariableID');
+        $accepted = $actionID <= 0 || (int) GetValue($actionID) === $this->ReadPropertyInteger('EkeyActionValue');
+        $name = $accepted ? $this->matchEkeyUser($user, $finger) : null;
+
+        if ($name === null) {
+            $text = "Nicht berechtigter Fingerabdruck (Benutzer $user, Finger $finger).";
+            if ($this->mode() !== self::MODE_OFF && $this->ReadPropertyBoolean('EkeyNotifyRejected')) {
+                $this->notify('ekey', $text);
+            } else {
+                $this->log("ekey: $text");
+            }
+            return;
+        }
+
+        if ($this->mode() === self::MODE_AWAY) {
+            $this->doDisarm("Fingerabdruck $name erkannt.");
+        } else {
+            $this->log("ekey: $name erkannt, \"Abwesend\" ist nicht aktiv.");
+        }
+    }
+
     private function onContact(int $id, bool $value): void
     {
         if ($this->mode() === self::MODE_OFF) {
@@ -372,6 +428,13 @@ class Alarmanlage extends IPSModule
         switch ($this->state()) {
             case self::STATE_IDLE:
                 $this->startPreAlarm($text);
+                break;
+            case self::STATE_PREALARM:
+                // Ein zweiter, anderer Auslöser bestätigt den Einbruch: Voralarm abbrechen, voller Alarm
+                if (strpos($this->GetValue('Trigger'), $text) === false) {
+                    $this->appendTrigger($text);
+                    $this->startAlarm(true);
+                }
                 break;
             case self::STATE_LATCHED:
                 $this->notify('Alarm', "Weiterer Auslöser: $text", 'alarm');
@@ -693,6 +756,28 @@ class Alarmanlage extends IPSModule
     private function presence(): array
     {
         return $this->namedList('Presence');
+    }
+
+    private function ekeyIDs(): array
+    {
+        $ids = [
+            $this->ReadPropertyInteger('EkeyUserVariableID'),
+            $this->ReadPropertyInteger('EkeyFingerVariableID'),
+            $this->ReadPropertyInteger('EkeyActionVariableID'),
+        ];
+        return array_values(array_filter($ids, fn ($id) => $id > 0));
+    }
+
+    private function matchEkeyUser(int $user, int $finger): ?string
+    {
+        foreach ($this->listProperty('EkeyUsers') as $row) {
+            $rowFinger = (int) ($row['FingerID'] ?? -1);
+            if ((int) ($row['UserID'] ?? -1) === $user && ($rowFinger < 0 || $rowFinger === $finger)) {
+                $name = trim((string) ($row['Name'] ?? ''));
+                return $name !== '' ? $name : "Benutzer $user";
+            }
+        }
+        return null;
     }
 
     private function outputIDs(): array
