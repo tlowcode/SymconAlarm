@@ -45,6 +45,16 @@ class Sim
         }
     }
 
+    public static function fireTextTimer(): bool
+    {
+        $m = self::$module;
+        if ($m->timers['TextTimer'] <= 0) {
+            return false;
+        }
+        $m->RequestAction('TextTimerElapsed', 0);
+        return true;
+    }
+
     public static function fireTimer(): string
     {
         $m = self::$module;

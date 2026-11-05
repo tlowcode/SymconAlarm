@@ -262,10 +262,14 @@ function texts(): array
 $m = setup();
 Sim::$vars[WINDOW]['value'] = true;
 Sim::update(REQUEST, true);
-check('Scharf, dann offener Kontakt', texts() === ['Scharf Nacht', 'Offen: Kueche']);
+check('Offener Kontakt als Zustand, "Scharf Nacht" als Hinweis', texts() === ['Offen: Kueche', 'Scharf Nacht']);
+Sim::fireTextTimer();
+check('Nach Hinweis zurück zu "Offen: Kueche"', end(Sim::$actions)[1] === 'Offen: Kueche');
 Sim::reset();
 Sim::update(WINDOW, false);
-check('Nachträglich überwacht', texts() === ['OK: Kueche']);
+check('Beim Schließen: Zustand zurücknehmen, Hinweis OK', texts() === ['', 'OK: Kueche']);
+Sim::fireTextTimer();
+check('Hinweis wird mit leerem Text zurückgenommen', texts() === ['', 'OK: Kueche', '']);
 Sim::reset();
 Sim::update(DOOR, true);
 Sim::fireTimer();
@@ -274,10 +278,28 @@ check('Alle Texte höchstens 14 Zeichen', max(array_map('strlen', texts())) <= 1
 Sim::fireTimer();
 Sim::reset();
 Sim::fireTimer();
-check('Sirene aus', texts() === ['Sirene aus']);
+check('Hinweis "Sirene aus"', texts() === ['Sirene aus']);
+Sim::fireTextTimer();
+check('Danach wieder ALARM, bis unscharf', texts() === ['Sirene aus', 'ALARM Haustuer']);
 Sim::reset();
 Sim::update(REQUEST, false);
-check('Unscharf', texts() === ['Unscharf']);
+check('Unscharf: ALARM zurücknehmen, Hinweis Unscharf', texts() === ['', 'Unscharf']);
+Sim::fireTextTimer();
+check('Display danach leer', texts() === ['', 'Unscharf', '']);
+
+$m = setup();
+$m->properties['TextInfoDuration'] = 0;
+Sim::update(REQUEST, true);
+check('Anzeigedauer 0: kein Ausblend-Timer', $m->timers['TextTimer'] === 0 && texts() === ['Scharf Nacht']);
+
+$m = setup();
+Sim::update(REQUEST, true);
+Sim::fireTextTimer();
+Sim::update(DOOR, true);
+Sim::reset();
+scan(9, 9);
+Sim::fireTextTimer();
+check('ekey-Hinweis im Voralarm, danach wieder Voralarm', texts() === ['Finger abgel.', 'Voralarm 30s']);
 
 $m = setup();
 $m->properties['TextPreAlarm'] = false;

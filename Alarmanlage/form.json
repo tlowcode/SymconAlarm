@@ -288,12 +288,20 @@
                     "name": "TextReplaceUmlauts",
                     "caption": "Umlaute ersetzen und Sonderzeichen entfernen (für DPT16.000 ASCII)"
                 },
-                { "type": "Label", "caption": "Welche Meldungen sollen ausgegeben werden?" },
+                { "type": "Label", "caption": "Zustandsmeldungen bleiben stehen, bis der Zustand endet, und werden dann mit leerem Text zurückgenommen:" },
+                { "type": "CheckBox", "name": "TextAlarm", "caption": "Alarm mit erstem Auslöser, bis unscharf (\"ALARM Haustuer\")" },
+                { "type": "CheckBox", "name": "TextPreAlarm", "caption": "Voralarm (\"Voralarm 30s\")" },
+                { "type": "CheckBox", "name": "TextExcluded", "caption": "Ausgeklammerte Kontakte, bis geschlossen (\"Offen: Kueche\", \"3 Kont. offen\"), Hinweis beim Schließen (\"OK: Kueche\")" },
+                { "type": "Label", "caption": "Hinweise werden nach der Anzeigedauer wieder ausgeblendet:" },
+                {
+                    "type": "NumberSpinner",
+                    "name": "TextInfoDuration",
+                    "caption": "Anzeigedauer Hinweise (0 = bis zur nächsten Meldung)",
+                    "suffix": " s",
+                    "minimum": 0
+                },
                 { "type": "CheckBox", "name": "TextArmed", "caption": "Scharf (\"Scharf Nacht\", \"Scharf Abwes.\")" },
                 { "type": "CheckBox", "name": "TextDisarmed", "caption": "Unscharf (\"Unscharf\")" },
-                { "type": "CheckBox", "name": "TextExcluded", "caption": "Offene Kontakte beim Schärfen und nachträglich überwachte (\"Offen: Kueche\", \"OK: Kueche\")" },
-                { "type": "CheckBox", "name": "TextPreAlarm", "caption": "Voralarm (\"Voralarm 30s\")" },
-                { "type": "CheckBox", "name": "TextAlarm", "caption": "Alarm mit erstem Auslöser (\"ALARM Haustuer\")" },
                 { "type": "CheckBox", "name": "TextSirenOff", "caption": "Sirene aus (\"Sirene aus\")" },
                 { "type": "CheckBox", "name": "TextEkeyRejected", "caption": "ekey: nicht berechtigter Finger, solange scharf (\"Finger abgel.\")" }
             ]

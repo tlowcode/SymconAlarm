@@ -53,6 +53,7 @@ class Alarmanlage extends IPSModule
 
         $this->RegisterPropertyString('TextOutputs', '[]');
         $this->RegisterPropertyBoolean('TextReplaceUmlauts', true);
+        $this->RegisterPropertyInteger('TextInfoDuration', 30);
         foreach (self::TEXT_CATEGORIES as $category) {
             $this->RegisterPropertyBoolean('Text' . $category, true);
         }
@@ -67,8 +68,10 @@ class Alarmanlage extends IPSModule
         $this->RegisterAttributeString('NextStep', '');
         $this->RegisterAttributeString('LastEkeyScan', '');
         $this->RegisterAttributeString('TriggerSource', '');
+        $this->RegisterAttributeString('LastText', '');
 
         $this->RegisterTimer('StepTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'TimerElapsed\', 0);');
+        $this->RegisterTimer('TextTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'TextTimerElapsed\', 0);');
 
         $this->ensureProfiles();
         $this->RegisterVariableInteger('Mode', 'Modus', 'Alarm.Mode', 10);
@@ -135,6 +138,7 @@ class Alarmanlage extends IPSModule
         $this->lock(function () {
             $this->reconcileContacts();
             $this->setArmedStatus($this->mode() !== self::MODE_OFF);
+            $this->refreshDisplay();
 
             // Nach Neustart: einen offenen Schritt (Voralarm, Sirene aus ...) zeitnah nachholen
             if ($this->ReadAttributeString('NextStep') !== '' && $this->GetTimerInterval('StepTimer') === 0) {
@@ -172,6 +176,12 @@ class Alarmanlage extends IPSModule
             case 'TimerElapsed':
                 $this->lock(function () {
                     $this->onTimer();
+                });
+                break;
+
+            case 'TextTimerElapsed':
+                $this->lock(function () {
+                    $this->refreshDisplay();
                 });
                 break;
 
@@ -365,7 +375,7 @@ class Alarmanlage extends IPSModule
             $text = "Nicht berechtigter Fingerabdruck (Benutzer $user, Finger $finger).";
             if ($this->mode() !== self::MODE_OFF && $this->ReadPropertyBoolean('EkeyNotifyRejected')) {
                 $this->notify('ekey', $text);
-                $this->display('EkeyRejected', 'Finger abgel.');
+                $this->showInfo('EkeyRejected', 'Finger abgel.');
             } else {
                 $this->log("ekey: $text");
             }
@@ -397,7 +407,8 @@ class Alarmanlage extends IPSModule
                 $this->writeIDs('ActiveContacts', $active);
                 $this->updateExcluded();
                 $this->notify('Kontakt überwacht', "$name wurde geschlossen und wird jetzt überwacht.");
-                $this->display('Excluded', "OK: $name");
+                $this->refreshDisplay();
+                $this->showInfo('Excluded', "OK: $name");
             }
             return;
         }
@@ -486,10 +497,8 @@ class Alarmanlage extends IPSModule
 
         $label = $mode === self::MODE_AWAY ? 'Abwesend' : 'Nacht';
         $text = "Scharf ($label).";
-        $this->display('Armed', $mode === self::MODE_AWAY ? 'Scharf Abwes.' : 'Scharf Nacht');
-        if ($pending) {
-            $this->display('Excluded', count($pending) === 1 ? 'Offen: ' . $this->names($pending) : count($pending) . ' Kont. offen');
-        }
+        $this->refreshDisplay();
+        $this->showInfo('Armed', $mode === self::MODE_AWAY ? 'Scharf Abwes.' : 'Scharf Nacht');
         if ($pending) {
             $text .= ' Offen, wird nach dem Schließen überwacht: ' . $this->names($pending) . '.';
             $this->notify('Alarmanlage scharf', $text);
@@ -516,7 +525,8 @@ class Alarmanlage extends IPSModule
         $this->SetValue('Trigger', '');
         $this->updateExcluded();
         $this->setArmedStatus(false);
-        $this->display('Disarmed', 'Unscharf');
+        $this->refreshDisplay();
+        $this->showInfo('Disarmed', 'Unscharf');
 
         if ($state !== self::STATE_IDLE) {
             $this->notify('Alarmanlage unscharf', "$reason Alarm beendet.");
@@ -557,7 +567,7 @@ class Alarmanlage extends IPSModule
         $this->SetValue('State', self::STATE_PREALARM);
         $this->SetValue('Trigger', $text);
         $this->WriteAttributeString('TriggerSource', $source);
-        $this->display('PreAlarm', "Voralarm {$delay}s");
+        $this->refreshDisplay();
         $this->switchLights('PreAlarmLights');
         $this->notify('Voralarm', "$text. Alarm in $delay s, wenn nicht unscharf.", 'buzzer');
 
@@ -577,7 +587,7 @@ class Alarmanlage extends IPSModule
                 $this->act((int) $row['VariableID'], $row['OpenValue'] ?? 0);
             }
             $this->notify('ALARM', $this->GetValue('Trigger'), 'alarm');
-            $this->display('Alarm', 'ALARM ' . $this->ReadAttributeString('TriggerSource'));
+            $this->refreshDisplay();
         }
 
         if ($full || $this->ReadPropertyInteger('SirenDelay') <= 0) {
@@ -602,7 +612,7 @@ class Alarmanlage extends IPSModule
         $this->switchSirens(false);
         $this->SetValue('State', self::STATE_LATCHED);
         $this->notify('Alarm', 'Sirene abgeschaltet. Anlage bleibt im Alarmzustand, bis unscharf geschaltet wird.');
-        $this->display('SirenOff', 'Sirene aus');
+        $this->showInfo('SirenOff', 'Sirene aus');
     }
 
     // ---------- Aktoren ----------
@@ -821,11 +831,45 @@ class Alarmanlage extends IPSModule
         return array_values(array_filter(array_unique($ids), fn ($id) => $id > 0));
     }
 
-    /** Gibt einen Kurztext (DPT16, max. 14 Zeichen) auf allen Textausgaben aus, sofern die Kategorie aktiv ist. */
-    private function display(string $category, string $text): void
+    /** Zustandsmeldung für die Textausgabe; leer nimmt die Meldung auf dem Display zurück. */
+    private function persistentText(): string
+    {
+        $state = $this->state();
+        if ($state >= self::STATE_ALARM && $this->ReadPropertyBoolean('TextAlarm')) {
+            return 'ALARM ' . $this->ReadAttributeString('TriggerSource');
+        }
+        if ($state === self::STATE_PREALARM && $this->ReadPropertyBoolean('TextPreAlarm')) {
+            return 'Voralarm ' . $this->ReadPropertyInteger('EntryDelay') . 's';
+        }
+        $pending = $this->readIDs('PendingContacts');
+        if ($this->mode() !== self::MODE_OFF && $pending && $this->ReadPropertyBoolean('TextExcluded')) {
+            return count($pending) === 1 ? 'Offen: ' . $this->names($pending) : count($pending) . ' Kont. offen';
+        }
+        return '';
+    }
+
+    /** Zeigt die aktuelle Zustandsmeldung und beendet einen laufenden Hinweis. */
+    private function refreshDisplay(): void
+    {
+        $this->SetTimerInterval('TextTimer', 0);
+        $this->sendText($this->persistentText());
+    }
+
+    /** Zeigt einen Hinweis; nach der Anzeigedauer kehrt das Display zur Zustandsmeldung zurück. */
+    private function showInfo(string $category, string $text): void
+    {
+        if (!$this->ReadPropertyBoolean('Text' . $category)) {
+            return;
+        }
+        $this->sendText($text);
+        $duration = $this->ReadPropertyInteger('TextInfoDuration');
+        $this->SetTimerInterval('TextTimer', $duration > 0 ? $duration * 1000 : 0);
+    }
+
+    private function sendText(string $text): void
     {
         $outputs = $this->listProperty('TextOutputs');
-        if (!$outputs || !$this->ReadPropertyBoolean('Text' . $category)) {
+        if (!$outputs) {
             return;
         }
         if ($this->ReadPropertyBoolean('TextReplaceUmlauts')) {
@@ -833,6 +877,10 @@ class Alarmanlage extends IPSModule
             $text = preg_replace('/[^\x20-\x7E]/', '', $text);
         }
         $text = mb_substr($text, 0, 14);
+        if ($text === $this->ReadAttributeString('LastText')) {
+            return;
+        }
+        $this->WriteAttributeString('LastText', $text);
         foreach ($outputs as $row) {
             $this->act((int) $row['VariableID'], $text);
         }
