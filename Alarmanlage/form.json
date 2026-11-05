@@ -1,0 +1,275 @@
+{
+    "elements": [
+        {
+            "type": "ExpansionPanel",
+            "caption": "Sensoren",
+            "expanded": true,
+            "items": [
+                {
+                    "type": "List",
+                    "name": "Contacts",
+                    "caption": "Tür-/Fensterkontakte",
+                    "rowCount": 8,
+                    "add": true,
+                    "delete": true,
+                    "columns": [
+                        {
+                            "caption": "Variable",
+                            "name": "VariableID",
+                            "width": "350px",
+                            "add": 0,
+                            "edit": { "type": "SelectVariable" }
+                        },
+                        {
+                            "caption": "Name (leer = Variablenname)",
+                            "name": "Name",
+                            "width": "auto",
+                            "add": "",
+                            "edit": { "type": "ValidationTextBox" }
+                        }
+                    ]
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "ContactOpenValue",
+                    "caption": "Kontakt meldet \"offen\" mit 1 (true)"
+                },
+                {
+                    "type": "List",
+                    "name": "MotionSensors",
+                    "caption": "Bewegungsmelder (1 = Bewegung)",
+                    "rowCount": 4,
+                    "add": true,
+                    "delete": true,
+                    "columns": [
+                        {
+                            "caption": "Variable",
+                            "name": "VariableID",
+                            "width": "350px",
+                            "add": 0,
+                            "edit": { "type": "SelectVariable" }
+                        },
+                        {
+                            "caption": "Name (leer = Variablenname)",
+                            "name": "Name",
+                            "width": "auto",
+                            "add": "",
+                            "edit": { "type": "ValidationTextBox" }
+                        }
+                    ]
+                },
+                {
+                    "type": "List",
+                    "name": "Presence",
+                    "caption": "Anwesenheit (1 = zuhause)",
+                    "rowCount": 4,
+                    "add": true,
+                    "delete": true,
+                    "columns": [
+                        {
+                            "caption": "Variable",
+                            "name": "VariableID",
+                            "width": "350px",
+                            "add": 0,
+                            "edit": { "type": "SelectVariable" }
+                        },
+                        {
+                            "caption": "Name (leer = Variablenname)",
+                            "name": "Name",
+                            "width": "auto",
+                            "add": "",
+                            "edit": { "type": "ValidationTextBox" }
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "KNX Schärfen und Status",
+            "items": [
+                {
+                    "type": "SelectVariable",
+                    "name": "ArmRequestVariableID",
+                    "caption": "Scharf Request (1 = scharf Nacht, 0 = unscharf)"
+                },
+                {
+                    "type": "SelectVariable",
+                    "name": "ArmedStatusVariableID",
+                    "caption": "System Armed (Status)"
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "RequestCanDisarmAway",
+                    "caption": "Scharf Request 0 darf auch \"Abwesend\" unscharf schalten"
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "Aktoren",
+            "items": [
+                {
+                    "type": "List",
+                    "name": "Sirens",
+                    "caption": "Sirenen / Signalgeber (DPT1)",
+                    "rowCount": 3,
+                    "add": true,
+                    "delete": true,
+                    "columns": [
+                        {
+                            "caption": "Variable",
+                            "name": "VariableID",
+                            "width": "auto",
+                            "add": 0,
+                            "edit": { "type": "SelectVariable" }
+                        }
+                    ]
+                },
+                {
+                    "type": "List",
+                    "name": "AlarmLights",
+                    "caption": "Licht bei Alarm (auf 100 %)",
+                    "rowCount": 6,
+                    "add": true,
+                    "delete": true,
+                    "columns": [
+                        {
+                            "caption": "Schalten",
+                            "name": "SwitchVariableID",
+                            "width": "350px",
+                            "add": 0,
+                            "edit": { "type": "SelectVariable" }
+                        },
+                        {
+                            "caption": "Helligkeit (optional)",
+                            "name": "BrightnessVariableID",
+                            "width": "auto",
+                            "add": 0,
+                            "edit": { "type": "SelectVariable" }
+                        }
+                    ]
+                },
+                {
+                    "type": "List",
+                    "name": "PreAlarmLights",
+                    "caption": "Licht bei Voralarm (z. B. Flur)",
+                    "rowCount": 3,
+                    "add": true,
+                    "delete": true,
+                    "columns": [
+                        {
+                            "caption": "Schalten",
+                            "name": "SwitchVariableID",
+                            "width": "350px",
+                            "add": 0,
+                            "edit": { "type": "SelectVariable" }
+                        },
+                        {
+                            "caption": "Helligkeit (optional)",
+                            "name": "BrightnessVariableID",
+                            "width": "auto",
+                            "add": 0,
+                            "edit": { "type": "SelectVariable" }
+                        }
+                    ]
+                },
+                {
+                    "type": "List",
+                    "name": "Shutters",
+                    "caption": "Rollläden / Jalousien bei Alarm öffnen",
+                    "rowCount": 6,
+                    "add": true,
+                    "delete": true,
+                    "columns": [
+                        {
+                            "caption": "Variable",
+                            "name": "VariableID",
+                            "width": "350px",
+                            "add": 0,
+                            "edit": { "type": "SelectVariable" }
+                        },
+                        {
+                            "caption": "Wert für \"ganz auf\" (Auf/Ab: 0, Position: 0)",
+                            "name": "OpenValue",
+                            "width": "auto",
+                            "add": 0,
+                            "edit": { "type": "NumberSpinner" }
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "Zeiten",
+            "items": [
+                {
+                    "type": "NumberSpinner",
+                    "name": "EntryDelay",
+                    "caption": "Voralarm bis Alarm",
+                    "suffix": " s",
+                    "minimum": 0
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "SirenDelay",
+                    "caption": "Alarm bis Sirene",
+                    "suffix": " s",
+                    "minimum": 0
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "SirenDuration",
+                    "caption": "Sirenendauer (max. 3 Minuten empfohlen)",
+                    "suffix": " s",
+                    "minimum": 1
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "AwayArmDelay",
+                    "caption": "Niemand zuhause bis \"Abwesend\" scharf",
+                    "suffix": " s",
+                    "minimum": 0
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "Benachrichtigung und Optionen",
+            "items": [
+                {
+                    "type": "SelectInstance",
+                    "name": "VisuID",
+                    "caption": "Kachel-Visualisierung für Push-Nachrichten"
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "NotifyArmDisarm",
+                    "caption": "Push auch bei scharf/unscharf"
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "AllowVisuControl",
+                    "caption": "Modus über die Visualisierung schaltbar"
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "TestMode",
+                    "caption": "Testmodus (Sirenen werden nicht geschaltet, nur protokolliert)"
+                }
+            ]
+        }
+    ],
+    "actions": [
+        { "type": "Button", "caption": "Scharf (Nacht)", "onClick": "ALARM_ArmNight($id);" },
+        { "type": "Button", "caption": "Scharf (Abwesend)", "onClick": "ALARM_ArmAway($id);" },
+        { "type": "Button", "caption": "Unscharf", "onClick": "ALARM_Disarm($id);" },
+        { "type": "Button", "caption": "Status anzeigen", "onClick": "echo ALARM_GetStatusText($id);" }
+    ],
+    "status": [
+        { "code": 102, "icon": "active", "caption": "Alarmanlage bereit" },
+        { "code": 104, "icon": "inactive", "caption": "Keine Tür-/Fensterkontakte konfiguriert" },
+        { "code": 201, "icon": "error", "caption": "Mindestens eine konfigurierte Variable existiert nicht (siehe Meldungen)" }
+    ]
+}

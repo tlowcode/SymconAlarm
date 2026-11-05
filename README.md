@@ -1,0 +1,36 @@
+# SymconAlarm
+
+Alarmanlage als IP-Symcon-Modul (ab Symcon 7.0) für KNX-Kontakte, Bewegungsmelder und Anwesenheitserkennung.
+
+## Funktionen
+
+- **Scharf (Abwesend):** automatisch, wenn alle Personen eine einstellbare Zeit abwesend sind. Kontakte und Bewegungsmelder lösen nach der Eingangsverzögerung Alarm aus. Heimkommen schaltet unscharf, auch während des Voralarms.
+- **Scharf (Nacht):** über den KNX „Scharf Request“ (1). Kontaktöffnung startet einen Voralarm; Bewegung während des Voralarms löst sofort den vollen Alarm aus. Bewegung ohne vorherige Kontaktöffnung wird ignoriert. Request 0 schaltet unscharf.
+- Beim Schärfen offene Kontakte werden ausgeklammert (Push mit Liste) und ab dem Schließen überwacht.
+- Alarmstufen: Voralarm (Push, optional Orientierungslicht) → Alarm (Licht 100 %, Rollläden auf, Push) → Sirene → Sirene aus nach einstellbarer Dauer, Alarmzustand bleibt bis unscharf.
+- Status „System Armed“ wird an KNX zurückgemeldet.
+- Testmodus: Sirenen werden nur protokolliert, nicht geschaltet (bei neuen Instanzen aktiv).
+
+## Installation
+
+1. Diesen Ordner per Git-URL über **Kern-Instanzen → Modules → Hinzufügen** einbinden oder nach `/var/lib/symcon/modules/SymconAlarm` (Windows: `C:\ProgramData\Symcon\modules\SymconAlarm`) kopieren und in **Modules** neu laden.
+2. Instanz **Alarmanlage** anlegen.
+3. Sensoren, KNX-Variablen, Aktoren und Kachel-Visualisierung im Formular eintragen, übernehmen.
+4. Mit aktivem Testmodus beide Modi durchspielen (Meldungen-Log, Filter „Alarmanlage“), danach Testmodus abschalten.
+
+## Öffentliche Funktionen
+
+```php
+ALARM_ArmNight(int $InstanzID);
+ALARM_ArmAway(int $InstanzID);
+ALARM_Disarm(int $InstanzID);
+ALARM_GetStatusText(int $InstanzID): string;
+```
+
+## Tests
+
+Die Logik lässt sich ohne Symcon gegen eine nachgebildete API prüfen:
+
+```sh
+php tests/run.php
+```

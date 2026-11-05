@@ -1,0 +1,140 @@
+<?php
+
+declare(strict_types=1);
+
+// Minimale Nachbildung der Symcon-API, gerade genug für die Modultests.
+
+const KR_READY = 10103;
+const IPS_KERNELSTARTED = 10001;
+const VM_UPDATE = 10603;
+const KL_NOTIFY = 10203;
+const KL_WARNING = 10204;
+const VARIABLETYPE_BOOLEAN = 0;
+const VARIABLETYPE_INTEGER = 1;
+const VARIABLETYPE_FLOAT = 2;
+const VARIABLETYPE_STRING = 3;
+
+class Sim
+{
+    public static array $vars = [];     // id => ['name', 'type', 'value', 'profile']
+    public static array $profiles = [];
+    public static array $actions = [];  // Protokoll aller RequestAction-Aufrufe
+    public static array $pushes = [];
+    public static ?IPSModule $module = null;
+
+    public static function addVar(int $id, string $name, int $type, $value, string $profile = ''): void
+    {
+        self::$vars[$id] = ['name' => $name, 'type' => $type, 'value' => $value, 'profile' => $profile];
+    }
+
+    public static function reset(): void
+    {
+        self::$actions = [];
+        self::$pushes = [];
+    }
+
+    /** Setzt einen Sensorwert und stellt die VM_UPDATE-Nachricht zu. */
+    public static function update(int $id, $value): void
+    {
+        $old = self::$vars[$id]['value'];
+        self::$vars[$id]['value'] = $value;
+        if (self::$module && in_array($id, self::$module->watched, true)) {
+            self::$module->MessageSink(time(), $id, VM_UPDATE, [$value, $old !== $value, $old]);
+        }
+    }
+
+    public static function fireTimer(): string
+    {
+        $m = self::$module;
+        if ($m->timers['StepTimer'] <= 0) {
+            return '';
+        }
+        $next = $m->attributes['NextStep'];
+        $m->RequestAction('TimerElapsed', 0);
+        return $next;
+    }
+}
+
+class IPSModule
+{
+    public int $InstanceID = 99999;
+    public array $properties = [];
+    public array $attributes = [];
+    public array $timers = [];
+    public array $values = [];
+    public array $watched = [];
+    public int $status = 0;
+    public array $log = [];
+
+    public function __construct()
+    {
+        Sim::$module = $this;
+    }
+
+    public function Create() {}
+    public function ApplyChanges() {}
+
+    protected function RegisterPropertyString($n, $v) { $this->properties[$n] = $v; }
+    protected function RegisterPropertyInteger($n, $v) { $this->properties[$n] = $v; }
+    protected function RegisterPropertyBoolean($n, $v) { $this->properties[$n] = $v; }
+    protected function ReadPropertyString($n) { return $this->properties[$n]; }
+    protected function ReadPropertyInteger($n) { return $this->properties[$n]; }
+    protected function ReadPropertyBoolean($n) { return $this->properties[$n]; }
+
+    protected function RegisterAttributeString($n, $v) { $this->attributes[$n] = $v; }
+    protected function ReadAttributeString($n) { return $this->attributes[$n]; }
+    protected function WriteAttributeString($n, $v) { $this->attributes[$n] = $v; }
+
+    protected function RegisterTimer($n, $i, $s) { $this->timers[$n] = $i; }
+    protected function SetTimerInterval($n, $i) { $this->timers[$n] = $i; }
+    protected function GetTimerInterval($n) { return $this->timers[$n]; }
+
+    protected function RegisterVariableInteger($i, $n, $p, $pos) { $this->values[$i] = 0; }
+    protected function RegisterVariableString($i, $n, $p, $pos) { $this->values[$i] = ''; }
+    protected function GetValue($i) { return $this->values[$i]; }
+    protected function SetValue($i, $v) { $this->values[$i] = $v; }
+    protected function GetIDForIdent($i) { return $i; }
+    protected function EnableAction($i) {}
+    protected function DisableAction($i) {}
+
+    protected function RegisterMessage($id, $msg) { if ($msg === VM_UPDATE) { $this->watched[] = $id; } }
+    protected function UnregisterMessage($id, $msg) { $this->watched = array_values(array_diff($this->watched, [$id])); }
+    protected function GetMessageList() { return array_fill_keys($this->watched, [VM_UPDATE]); }
+    protected function RegisterReference($id) {}
+    protected function UnregisterReference($id) {}
+    protected function GetReferenceList() { return []; }
+
+    protected function SetStatus($s) { $this->status = $s; }
+    protected function SendDebug($t, $m, $f) {}
+    protected function LogMessage($m, $t) { $this->log[] = $m; }
+}
+
+function IPS_GetKernelRunlevel() { return KR_READY; }
+function IPS_VariableExists($id) { return isset(Sim::$vars[$id]); }
+function IPS_ObjectExists($id) { return isset(Sim::$vars[$id]); }
+function IPS_InstanceExists($id) { return $id === 77777; }
+function IPS_GetName($id) { return Sim::$vars[$id]['name']; }
+function IPS_GetVariable($id)
+{
+    $v = Sim::$vars[$id];
+    return ['VariableType' => $v['type'], 'VariableProfile' => $v['profile'], 'VariableCustomProfile' => ''];
+}
+function IPS_VariableProfileExists($n) { return isset(Sim::$profiles[$n]); }
+function IPS_GetVariableProfile($n) { return Sim::$profiles[$n]; }
+function IPS_CreateVariableProfile($n, $t) { Sim::$profiles[$n] = ['MaxValue' => 0]; }
+function IPS_SetVariableProfileAssociation($n, $v, $t, $i, $c) {}
+function IPS_SemaphoreEnter($k, $t) { return true; }
+function IPS_SemaphoreLeave($k) { return true; }
+function GetValue($id) { return Sim::$vars[$id]['value']; }
+function GetValueFormatted($id) { return (string) Sim::$module->values[$id]; }
+function RequestAction($id, $value)
+{
+    Sim::$vars[$id]['value'] = $value;
+    Sim::$actions[] = [$id, $value];
+    return true;
+}
+function VISU_PostNotificationEx($id, $title, $text, $icon, $sound, $target)
+{
+    Sim::$pushes[] = "$title: $text";
+    return 1;
+}

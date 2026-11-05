@@ -1,0 +1,14 @@
+{
+    "id": "{CBBD2F2A-95F6-494E-B400-4F75D794043F}",
+    "name": "Alarmanlage",
+    "type": 3,
+    "vendor": "",
+    "aliases": [
+        "Alarmanlage"
+    ],
+    "parentRequirements": [],
+    "childRequirements": [],
+    "implemented": [],
+    "prefix": "ALARM",
+    "url": ""
+}

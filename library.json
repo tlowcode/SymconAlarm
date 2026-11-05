@@ -1,0 +1,12 @@
+{
+    "id": "{8170FABD-B7F9-4A8E-9558-5548E6A073E4}",
+    "author": "Thilo Ackermann",
+    "name": "SymconAlarm",
+    "url": "",
+    "compatibility": {
+        "version": "7.0"
+    },
+    "version": "1.0",
+    "build": 1,
+    "date": 0
+}

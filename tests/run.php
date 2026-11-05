@@ -1,0 +1,178 @@
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . '/stubs.php';
+require __DIR__ . '/../Alarmanlage/module.php';
+
+const DOOR = 101, WINDOW = 102, MOTION_WZ = 201, MOTION_FLUR = 202;
+const THILO = 301, NADINE = 302, REQUEST = 401, ARMED = 402;
+const SIREN = 501, LIGHT = 601, DIMMER = 602, SHUTTER = 701;
+
+$failures = 0;
+function check(string $label, bool $ok): void
+{
+    global $failures;
+    echo ($ok ? '  ok   ' : '  FAIL ') . $label . "\n";
+    if (!$ok) {
+        $failures++;
+    }
+}
+
+function setup(): Alarmanlage
+{
+    Sim::$vars = [];
+    Sim::$profiles = ['Hue.Brightness' => ['MaxValue' => 254]];
+    Sim::reset();
+    Sim::addVar(DOOR, 'Haustür', VARIABLETYPE_BOOLEAN, false);
+    Sim::addVar(WINDOW, 'Fenster Küche', VARIABLETYPE_BOOLEAN, false);
+    Sim::addVar(MOTION_WZ, 'BWM Wohnzimmer', VARIABLETYPE_BOOLEAN, false);
+    Sim::addVar(MOTION_FLUR, 'BWM Flur EG', VARIABLETYPE_BOOLEAN, false);
+    Sim::addVar(THILO, 'Thilo', VARIABLETYPE_BOOLEAN, true);
+    Sim::addVar(NADINE, 'Nadine', VARIABLETYPE_BOOLEAN, true);
+    Sim::addVar(REQUEST, 'Scharf Request', VARIABLETYPE_BOOLEAN, false);
+    Sim::addVar(ARMED, 'System Armed', VARIABLETYPE_BOOLEAN, false);
+    Sim::addVar(SIREN, 'Sirene', VARIABLETYPE_BOOLEAN, false);
+    Sim::addVar(LIGHT, 'Licht', VARIABLETYPE_BOOLEAN, false);
+    Sim::addVar(DIMMER, 'Licht Helligkeit', VARIABLETYPE_INTEGER, 0, 'Hue.Brightness');
+    Sim::addVar(SHUTTER, 'Rollladen', VARIABLETYPE_BOOLEAN, true);
+
+    $m = new Alarmanlage();
+    $m->Create();
+    $m->properties = array_merge($m->properties, [
+        'Contacts'              => json_encode([['VariableID' => DOOR, 'Name' => ''], ['VariableID' => WINDOW, 'Name' => 'Küche']]),
+        'MotionSensors'         => json_encode([['VariableID' => MOTION_WZ, 'Name' => 'Wohnzimmer'], ['VariableID' => MOTION_FLUR, 'Name' => 'Flur EG']]),
+        'Presence'              => json_encode([['VariableID' => THILO, 'Name' => ''], ['VariableID' => NADINE, 'Name' => '']]),
+        'ArmRequestVariableID'  => REQUEST,
+        'ArmedStatusVariableID' => ARMED,
+        'Sirens'                => json_encode([['VariableID' => SIREN]]),
+        'AlarmLights'           => json_encode([['SwitchVariableID' => LIGHT, 'BrightnessVariableID' => DIMMER]]),
+        'Shutters'              => json_encode([['VariableID' => SHUTTER, 'OpenValue' => 0]]),
+        'VisuID'                => 77777,
+        'TestMode'              => false,
+    ]);
+    $m->ApplyChanges();
+    return $m;
+}
+
+function mode(Alarmanlage $m): int { return $m->values['Mode']; }
+function state(Alarmanlage $m): int { return $m->values['State']; }
+
+echo "Konfiguration\n";
+$m = setup();
+check('Status 102 (bereit)', $m->status === 102);
+check('Alle Sensoren und Scharf Request abonniert', count($m->watched) === 7);
+
+echo "Abwesend: offenes Fenster wird ausgeklammert und später überwacht\n";
+$m = setup();
+Sim::$vars[WINDOW]['value'] = true;
+Sim::update(THILO, false);
+check('Noch jemand zuhause, kein Timer', $m->timers['StepTimer'] === 0);
+Sim::update(NADINE, false);
+check('Niemand zuhause, Scharfschaltung geplant', $m->attributes['NextStep'] === 'armAway');
+check('Timer löst armAway aus', Sim::fireTimer() === 'armAway');
+check('Modus Abwesend', mode($m) === 1);
+check('System Armed = 1', Sim::$vars[ARMED]['value'] === true);
+check('Küche ausgeklammert', $m->values['Excluded'] === 'Küche');
+check('Push mit offenem Kontakt', (bool) preg_grep('/Küche/', Sim::$pushes));
+Sim::update(WINDOW, false);
+check('Küche nach Schließen überwacht', $m->values['Excluded'] === '');
+Sim::update(WINDOW, true);
+check('Küche öffnen startet Voralarm', state($m) === 1);
+
+echo "Abwesend: Heimkommen während Voralarm schaltet unscharf\n";
+$m = setup();
+Sim::update(THILO, false);
+Sim::update(NADINE, false);
+Sim::fireTimer();
+Sim::update(DOOR, true);
+check('Voralarm', state($m) === 1 && $m->attributes['NextStep'] === 'alarm');
+Sim::update(THILO, true);
+check('Unscharf', mode($m) === 0 && state($m) === 0);
+check('Kein Timer mehr', $m->timers['StepTimer'] === 0);
+check('System Armed = 0', Sim::$vars[ARMED]['value'] === false);
+check('Sirene nie geschaltet', !in_array([SIREN, true], Sim::$actions, true));
+
+echo "Abwesend: Rückkehr vor Ablauf der Scharfschalt-Verzögerung\n";
+$m = setup();
+Sim::update(THILO, false);
+Sim::update(NADINE, false);
+Sim::update(NADINE, true);
+check('Scharfschaltung abgebrochen', $m->attributes['NextStep'] === '' && mode($m) === 0);
+
+echo "Abwesend: vollständiger Alarmablauf\n";
+$m = setup();
+Sim::update(THILO, false);
+Sim::update(NADINE, false);
+Sim::fireTimer();
+Sim::reset();
+Sim::update(MOTION_WZ, true);
+check('Bewegung startet Voralarm', state($m) === 1);
+check('Timer alarm', Sim::fireTimer() === 'alarm');
+check('Alarm', state($m) === 2);
+check('Licht an, Helligkeit 254', in_array([LIGHT, true], Sim::$actions, true) && in_array([DIMMER, 254], Sim::$actions, true));
+check('Rollladen auf (false)', in_array([SHUTTER, false], Sim::$actions, true));
+check('Timer siren', Sim::fireTimer() === 'siren');
+check('Sirene an', state($m) === 3 && Sim::$vars[SIREN]['value'] === true);
+check('Timer sirenOff', Sim::fireTimer() === 'sirenOff');
+check('Sirene aus, Alarm gespeichert', state($m) === 4 && Sim::$vars[SIREN]['value'] === false);
+Sim::update(REQUEST, false);
+check('Scharf Request 0 schaltet "Abwesend" nicht unscharf', mode($m) === 1);
+Sim::update(NADINE, true);
+check('Anwesenheit schaltet unscharf', mode($m) === 0 && state($m) === 0);
+
+echo "Nacht: Bewegung allein wird ignoriert\n";
+$m = setup();
+Sim::update(REQUEST, true);
+check('Modus Nacht', mode($m) === 2);
+Sim::update(MOTION_FLUR, true);
+check('Kein Voralarm', state($m) === 0);
+
+echo "Nacht: Kontakt, dann Bewegung = sofort voller Alarm\n";
+$m = setup();
+Sim::update(REQUEST, true);
+Sim::update(DOOR, true);
+check('Voralarm', state($m) === 1);
+Sim::update(MOTION_FLUR, true);
+check('Sofort Sirene', state($m) === 3 && Sim::$vars[SIREN]['value'] === true);
+check('Auslöser enthält beide', $m->values['Trigger'] === 'Kontakt Haustür geöffnet, Bewegung Flur EG');
+Sim::update(REQUEST, false);
+check('Scharf Request 0 schaltet unscharf', mode($m) === 0);
+check('Sirene aus', Sim::$vars[SIREN]['value'] === false);
+
+echo "Nacht: Kontakt ohne Bewegung = Voralarm, dann gestufter Alarm\n";
+$m = setup();
+Sim::update(REQUEST, true);
+Sim::update(WINDOW, true);
+Sim::fireTimer();
+check('Alarm ohne Sirene', state($m) === 2 && Sim::$vars[SIREN]['value'] === false);
+Sim::fireTimer();
+check('Sirene nach Verzögerung', state($m) === 3);
+
+echo "Scharf Request erneut 1 nach Unscharf (gleicher Wert)\n";
+$m = setup();
+Sim::update(REQUEST, true);
+Sim::$vars[REQUEST]['value'] = true;
+$m->Disarm();
+Sim::update(REQUEST, true);
+check('Wird wieder scharf', mode($m) === 2);
+
+echo "Testmodus schaltet keine Sirene\n";
+$m = setup();
+$m->properties['TestMode'] = true;
+Sim::update(REQUEST, true);
+Sim::update(DOOR, true);
+Sim::update(MOTION_WZ, true);
+check('Zustand Sirene', state($m) === 3);
+check('Sirene nicht geschaltet', Sim::$vars[SIREN]['value'] === false);
+
+echo "Kontakt wird im scharfen Zustand zur Konfiguration hinzugefügt\n";
+$m = setup();
+Sim::addVar(103, 'Fenster Bad', VARIABLETYPE_BOOLEAN, true);
+Sim::update(REQUEST, true);
+$m->properties['Contacts'] = json_encode([['VariableID' => DOOR], ['VariableID' => WINDOW], ['VariableID' => 103]]);
+$m->ApplyChanges();
+check('Neuer offener Kontakt ausgeklammert', $m->values['Excluded'] === 'Fenster Bad');
+
+echo $failures === 0 ? "\nAlle Tests bestanden.\n" : "\n$failures Test(s) fehlgeschlagen.\n";
+exit($failures === 0 ? 0 : 1);
