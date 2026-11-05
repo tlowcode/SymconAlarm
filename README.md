@@ -11,6 +11,7 @@ Alarmanlage als IP-Symcon-Modul (ab Symcon 7.0) für KNX-Kontakte, Bewegungsmeld
 - Beim Schärfen offene Kontakte werden ausgeklammert (Push mit Liste) und ab dem Schließen überwacht.
 - Alarmstufen: Voralarm (Push, optional Orientierungslicht) → Alarm (Licht 100 %, Rollläden auf, Push) → Sirene → Sirene aus nach einstellbarer Dauer, Alarmzustand bleibt bis unscharf.
 - Status „System Armed“ wird an KNX zurückgemeldet.
+- KNX-Textausgabe (DPT16, 14 Zeichen) auf beliebig viele Textvariablen; pro Meldungsart abschaltbar (Scharf, Unscharf, offene Kontakte, Voralarm, Alarm, Sirene aus, ekey abgelehnt).
 - Testmodus: Sirenen werden nur protokolliert, nicht geschaltet (bei neuen Instanzen aktiv).
 
 ## Installation

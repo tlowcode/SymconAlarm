@@ -14,6 +14,9 @@ class Alarmanlage extends IPSModule
     private const STATE_SIREN = 3;
     private const STATE_LATCHED = 4;
 
+    /** Kategorien der DPT16-Textausgabe, Property heißt jeweils "Text" + Schlüssel */
+    private const TEXT_CATEGORIES = ['Armed', 'Disarmed', 'Excluded', 'PreAlarm', 'Alarm', 'SirenOff', 'EkeyRejected'];
+
     private const STATUS_OK = 102;
     private const STATUS_NO_CONTACTS = 104;
     private const STATUS_MISSING_VARIABLE = 201;
@@ -48,6 +51,12 @@ class Alarmanlage extends IPSModule
         $this->RegisterPropertyInteger('SirenDuration', 180);
         $this->RegisterPropertyInteger('AwayArmDelay', 300);
 
+        $this->RegisterPropertyString('TextOutputs', '[]');
+        $this->RegisterPropertyBoolean('TextReplaceUmlauts', true);
+        foreach (self::TEXT_CATEGORIES as $category) {
+            $this->RegisterPropertyBoolean('Text' . $category, true);
+        }
+
         $this->RegisterPropertyInteger('VisuID', 0);
         $this->RegisterPropertyBoolean('NotifyArmDisarm', true);
         $this->RegisterPropertyBoolean('AllowVisuControl', false);
@@ -57,6 +66,7 @@ class Alarmanlage extends IPSModule
         $this->RegisterAttributeString('PendingContacts', '[]');
         $this->RegisterAttributeString('NextStep', '');
         $this->RegisterAttributeString('LastEkeyScan', '');
+        $this->RegisterAttributeString('TriggerSource', '');
 
         $this->RegisterTimer('StepTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'TimerElapsed\', 0);');
 
@@ -355,6 +365,7 @@ class Alarmanlage extends IPSModule
             $text = "Nicht berechtigter Fingerabdruck (Benutzer $user, Finger $finger).";
             if ($this->mode() !== self::MODE_OFF && $this->ReadPropertyBoolean('EkeyNotifyRejected')) {
                 $this->notify('ekey', $text);
+                $this->display('EkeyRejected', 'Finger abgel.');
             } else {
                 $this->log("ekey: $text");
             }
@@ -386,12 +397,13 @@ class Alarmanlage extends IPSModule
                 $this->writeIDs('ActiveContacts', $active);
                 $this->updateExcluded();
                 $this->notify('Kontakt überwacht', "$name wurde geschlossen und wird jetzt überwacht.");
+                $this->display('Excluded', "OK: $name");
             }
             return;
         }
 
         if (in_array($id, $active, true)) {
-            $this->onTrigger("Kontakt $name geöffnet");
+            $this->onTrigger("Kontakt $name geöffnet", $name);
         }
     }
 
@@ -406,7 +418,7 @@ class Alarmanlage extends IPSModule
 
         switch ($this->mode()) {
             case self::MODE_AWAY:
-                $this->onTrigger($text);
+                $this->onTrigger($text, $name);
                 break;
 
             case self::MODE_NIGHT:
@@ -423,11 +435,11 @@ class Alarmanlage extends IPSModule
         }
     }
 
-    private function onTrigger(string $text): void
+    private function onTrigger(string $text, string $source): void
     {
         switch ($this->state()) {
             case self::STATE_IDLE:
-                $this->startPreAlarm($text);
+                $this->startPreAlarm($text, $source);
                 break;
             case self::STATE_PREALARM:
                 // Ein zweiter, anderer Auslöser bestätigt den Einbruch: Voralarm abbrechen, voller Alarm
@@ -474,6 +486,10 @@ class Alarmanlage extends IPSModule
 
         $label = $mode === self::MODE_AWAY ? 'Abwesend' : 'Nacht';
         $text = "Scharf ($label).";
+        $this->display('Armed', $mode === self::MODE_AWAY ? 'Scharf Abwes.' : 'Scharf Nacht');
+        if ($pending) {
+            $this->display('Excluded', count($pending) === 1 ? 'Offen: ' . $this->names($pending) : count($pending) . ' Kont. offen');
+        }
         if ($pending) {
             $text .= ' Offen, wird nach dem Schließen überwacht: ' . $this->names($pending) . '.';
             $this->notify('Alarmanlage scharf', $text);
@@ -500,6 +516,7 @@ class Alarmanlage extends IPSModule
         $this->SetValue('Trigger', '');
         $this->updateExcluded();
         $this->setArmedStatus(false);
+        $this->display('Disarmed', 'Unscharf');
 
         if ($state !== self::STATE_IDLE) {
             $this->notify('Alarmanlage unscharf', "$reason Alarm beendet.");
@@ -534,11 +551,13 @@ class Alarmanlage extends IPSModule
 
     // ---------- Alarmstufen ----------
 
-    private function startPreAlarm(string $text): void
+    private function startPreAlarm(string $text, string $source): void
     {
         $delay = $this->ReadPropertyInteger('EntryDelay');
         $this->SetValue('State', self::STATE_PREALARM);
         $this->SetValue('Trigger', $text);
+        $this->WriteAttributeString('TriggerSource', $source);
+        $this->display('PreAlarm', "Voralarm {$delay}s");
         $this->switchLights('PreAlarmLights');
         $this->notify('Voralarm', "$text. Alarm in $delay s, wenn nicht unscharf.", 'buzzer');
 
@@ -558,6 +577,7 @@ class Alarmanlage extends IPSModule
                 $this->act((int) $row['VariableID'], $row['OpenValue'] ?? 0);
             }
             $this->notify('ALARM', $this->GetValue('Trigger'), 'alarm');
+            $this->display('Alarm', 'ALARM ' . $this->ReadAttributeString('TriggerSource'));
         }
 
         if ($full || $this->ReadPropertyInteger('SirenDelay') <= 0) {
@@ -582,6 +602,7 @@ class Alarmanlage extends IPSModule
         $this->switchSirens(false);
         $this->SetValue('State', self::STATE_LATCHED);
         $this->notify('Alarm', 'Sirene abgeschaltet. Anlage bleibt im Alarmzustand, bis unscharf geschaltet wird.');
+        $this->display('SirenOff', 'Sirene aus');
     }
 
     // ---------- Aktoren ----------
@@ -792,10 +813,29 @@ class Alarmanlage extends IPSModule
                 $ids[] = (int) ($row['BrightnessVariableID'] ?? 0);
             }
         }
-        foreach ($this->listProperty('Shutters') as $row) {
-            $ids[] = (int) $row['VariableID'];
+        foreach (['Shutters', 'TextOutputs'] as $property) {
+            foreach ($this->listProperty($property) as $row) {
+                $ids[] = (int) $row['VariableID'];
+            }
         }
         return array_values(array_filter(array_unique($ids), fn ($id) => $id > 0));
+    }
+
+    /** Gibt einen Kurztext (DPT16, max. 14 Zeichen) auf allen Textausgaben aus, sofern die Kategorie aktiv ist. */
+    private function display(string $category, string $text): void
+    {
+        $outputs = $this->listProperty('TextOutputs');
+        if (!$outputs || !$this->ReadPropertyBoolean('Text' . $category)) {
+            return;
+        }
+        if ($this->ReadPropertyBoolean('TextReplaceUmlauts')) {
+            $text = strtr($text, ['ä' => 'ae', 'ö' => 'oe', 'ü' => 'ue', 'Ä' => 'Ae', 'Ö' => 'Oe', 'Ü' => 'Ue', 'ß' => 'ss']);
+            $text = preg_replace('/[^\x20-\x7E]/', '', $text);
+        }
+        $text = mb_substr($text, 0, 14);
+        foreach ($outputs as $row) {
+            $this->act((int) $row['VariableID'], $text);
+        }
     }
 
     private function notify(string $title, string $text, string $sound = ''): void

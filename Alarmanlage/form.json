@@ -264,6 +264,42 @@
         },
         {
             "type": "ExpansionPanel",
+            "caption": "KNX Textausgabe (DPT16, max. 14 Zeichen)",
+            "items": [
+                {
+                    "type": "List",
+                    "name": "TextOutputs",
+                    "caption": "Textvariablen (z. B. Displays, Tastsensoren)",
+                    "rowCount": 3,
+                    "add": true,
+                    "delete": true,
+                    "columns": [
+                        {
+                            "caption": "Variable",
+                            "name": "VariableID",
+                            "width": "auto",
+                            "add": 0,
+                            "edit": { "type": "SelectVariable" }
+                        }
+                    ]
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "TextReplaceUmlauts",
+                    "caption": "Umlaute ersetzen und Sonderzeichen entfernen (für DPT16.000 ASCII)"
+                },
+                { "type": "Label", "caption": "Welche Meldungen sollen ausgegeben werden?" },
+                { "type": "CheckBox", "name": "TextArmed", "caption": "Scharf (\"Scharf Nacht\", \"Scharf Abwes.\")" },
+                { "type": "CheckBox", "name": "TextDisarmed", "caption": "Unscharf (\"Unscharf\")" },
+                { "type": "CheckBox", "name": "TextExcluded", "caption": "Offene Kontakte beim Schärfen und nachträglich überwachte (\"Offen: Kueche\", \"OK: Kueche\")" },
+                { "type": "CheckBox", "name": "TextPreAlarm", "caption": "Voralarm (\"Voralarm 30s\")" },
+                { "type": "CheckBox", "name": "TextAlarm", "caption": "Alarm mit erstem Auslöser (\"ALARM Haustuer\")" },
+                { "type": "CheckBox", "name": "TextSirenOff", "caption": "Sirene aus (\"Sirene aus\")" },
+                { "type": "CheckBox", "name": "TextEkeyRejected", "caption": "ekey: nicht berechtigter Finger, solange scharf (\"Finger abgel.\")" }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
             "caption": "Zeiten",
             "items": [
                 {

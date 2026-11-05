@@ -9,6 +9,7 @@ const DOOR = 101, WINDOW = 102, MOTION_WZ = 201, MOTION_FLUR = 202;
 const THILO = 301, NADINE = 302, REQUEST = 401, ARMED = 402;
 const SIREN = 501, LIGHT = 601, DIMMER = 602, SHUTTER = 701;
 const EKEY_USER = 801, EKEY_FINGER = 802, EKEY_ACTION = 803;
+const TEXT = 901;
 
 $failures = 0;
 function check(string $label, bool $ok): void
@@ -40,6 +41,7 @@ function setup(): Alarmanlage
     Sim::addVar(EKEY_USER, 'Benutzer ID', VARIABLETYPE_INTEGER, 0);
     Sim::addVar(EKEY_FINGER, 'Finger ID', VARIABLETYPE_INTEGER, 0);
     Sim::addVar(EKEY_ACTION, 'Aktion', VARIABLETYPE_INTEGER, 0);
+    Sim::addVar(TEXT, 'Display Text', VARIABLETYPE_STRING, '');
 
     $m = new Alarmanlage();
     $m->Create();
@@ -59,6 +61,7 @@ function setup(): Alarmanlage
             ['UserID' => 1, 'FingerID' => 3, 'Name' => 'Thilo'],
             ['UserID' => 2, 'FingerID' => -1, 'Name' => 'Nadine'],
         ]),
+        'TextOutputs'           => json_encode([['VariableID' => TEXT]]),
         'VisuID'                => 77777,
         'TestMode'              => false,
     ]);
@@ -250,6 +253,49 @@ $m = setup();
 Sim::update(REQUEST, true);
 scan(1, 3);
 check('Nachtmodus bleibt bei Fingerabdruck scharf', mode($m) === 2);
+
+echo "DPT16-Textausgabe\n";
+function texts(): array
+{
+    return array_values(array_map(fn ($a) => $a[1], array_filter(Sim::$actions, fn ($a) => $a[0] === TEXT)));
+}
+$m = setup();
+Sim::$vars[WINDOW]['value'] = true;
+Sim::update(REQUEST, true);
+check('Scharf, dann offener Kontakt', texts() === ['Scharf Nacht', 'Offen: Kueche']);
+Sim::reset();
+Sim::update(WINDOW, false);
+check('Nachträglich überwacht', texts() === ['OK: Kueche']);
+Sim::reset();
+Sim::update(DOOR, true);
+Sim::fireTimer();
+check('Voralarm und Alarm mit Auslöser', texts() === ['Voralarm 30s', 'ALARM Haustuer']);
+check('Alle Texte höchstens 14 Zeichen', max(array_map('strlen', texts())) <= 14);
+Sim::fireTimer();
+Sim::reset();
+Sim::fireTimer();
+check('Sirene aus', texts() === ['Sirene aus']);
+Sim::reset();
+Sim::update(REQUEST, false);
+check('Unscharf', texts() === ['Unscharf']);
+
+$m = setup();
+$m->properties['TextPreAlarm'] = false;
+$m->properties['TextArmed'] = false;
+armAway();
+Sim::reset();
+Sim::update(DOOR, true);
+check('Abgewählte Kategorien werden nicht ausgegeben', texts() === []);
+scan(9, 9);
+check('ekey abgelehnt', texts() === ['Finger abgel.']);
+
+$m = setup();
+$m->properties['TextReplaceUmlauts'] = false;
+Sim::update(REQUEST, true);
+Sim::update(DOOR, true);
+Sim::update(WINDOW, true);
+$all = texts();
+check('Ohne Ersetzung bleiben Umlaute erhalten', end($all) === 'ALARM Haustür');
 
 echo $failures === 0 ? "\nAlle Tests bestanden.\n" : "\n$failures Test(s) fehlgeschlagen.\n";
 exit($failures === 0 ? 0 : 1);
