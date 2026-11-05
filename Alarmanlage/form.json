@@ -348,7 +348,28 @@
                 { "type": "CheckBox", "name": "TextArmed", "caption": "Scharf (\"Scharf Nacht\", \"Scharf Abwes.\")" },
                 { "type": "CheckBox", "name": "TextDisarmed", "caption": "Unscharf (\"Unscharf\")" },
                 { "type": "CheckBox", "name": "TextSirenOff", "caption": "Sirene aus (\"Sirene aus\")" },
-                { "type": "CheckBox", "name": "TextEkeyRejected", "caption": "ekey: nicht berechtigter Finger, solange scharf (\"Finger abgel.\")" }
+                { "type": "CheckBox", "name": "TextEkeyRejected", "caption": "ekey: nicht berechtigter Finger, solange scharf (\"Finger abgel.\")" },
+                { "type": "Label", "caption": "Countdown (zweite Meldung, sekündlich aktualisiert, danach mit leerem Text zurückgenommen):" },
+                {
+                    "type": "List",
+                    "name": "CountdownOutputs",
+                    "caption": "Textvariablen für den Countdown",
+                    "rowCount": 3,
+                    "add": true,
+                    "delete": true,
+                    "columns": [
+                        {
+                            "caption": "Variable",
+                            "name": "VariableID",
+                            "width": "auto",
+                            "add": 0,
+                            "edit": { "type": "SelectVariable" }
+                        }
+                    ]
+                },
+                { "type": "CheckBox", "name": "CountdownArm", "caption": "Schärf-Verzögerung Nacht und Abwesend (\"Scharf in 25s\", \"Scharf in 4:59\")" },
+                { "type": "CheckBox", "name": "CountdownPreAlarm", "caption": "Voralarm (\"Alarm in 25s\")" },
+                { "type": "CheckBox", "name": "CountdownTimeOnly", "caption": "Nur die Zeit ausgeben (\"25s\", \"4:59\")" }
             ]
         },
         {
@@ -375,6 +396,13 @@
                     "caption": "Sirenendauer (max. 3 Minuten empfohlen)",
                     "suffix": " s",
                     "minimum": 1
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "NightArmDelay",
+                    "caption": "Ausgangsverzögerung \"Nacht\" (Scharf Request bis scharf, 0 = sofort)",
+                    "suffix": " s",
+                    "minimum": 0
                 },
                 {
                     "type": "NumberSpinner",

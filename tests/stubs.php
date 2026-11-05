@@ -96,6 +96,9 @@ class IPSModule
     protected function RegisterAttributeString($n, $v) { $this->attributes[$n] = $v; }
     protected function ReadAttributeString($n) { return $this->attributes[$n]; }
     protected function WriteAttributeString($n, $v) { $this->attributes[$n] = $v; }
+    protected function RegisterAttributeInteger($n, $v) { $this->attributes[$n] = $v; }
+    protected function ReadAttributeInteger($n) { return $this->attributes[$n]; }
+    protected function WriteAttributeInteger($n, $v) { $this->attributes[$n] = $v; }
 
     protected function RegisterTimer($n, $i, $s) { $this->timers[$n] = $i; }
     protected function SetTimerInterval($n, $i) { $this->timers[$n] = $i; }

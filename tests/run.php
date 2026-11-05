@@ -9,7 +9,7 @@ const DOOR = 101, WINDOW = 102, MOTION_WZ = 201, MOTION_FLUR = 202;
 const THILO = 301, NADINE = 302, REQUEST = 401, ARMED = 402;
 const SIREN = 501, LIGHT = 601, DIMMER = 602, SHUTTER = 701;
 const EKEY_USER = 801, EKEY_FINGER = 802, EKEY_ACTION = 803;
-const TEXT = 901;
+const TEXT = 901, COUNTDOWN = 902;
 
 $failures = 0;
 function check(string $label, bool $ok): void
@@ -42,6 +42,7 @@ function setup(): Alarmanlage
     Sim::addVar(EKEY_FINGER, 'Finger ID', VARIABLETYPE_INTEGER, 0);
     Sim::addVar(EKEY_ACTION, 'Aktion', VARIABLETYPE_INTEGER, 0);
     Sim::addVar(TEXT, 'Display Text', VARIABLETYPE_STRING, '');
+    Sim::addVar(COUNTDOWN, 'Display Countdown', VARIABLETYPE_STRING, '');
 
     $m = new Alarmanlage();
     $m->Create();
@@ -62,6 +63,8 @@ function setup(): Alarmanlage
             ['UserID' => 2, 'FingerID' => -1, 'Name' => 'Nadine'],
         ]),
         'TextOutputs'           => json_encode([['VariableID' => TEXT]]),
+        'CountdownOutputs'      => json_encode([['VariableID' => COUNTDOWN]]),
+        'NightArmDelay'         => 0,
         'VisuID'                => 77777,
         'TestMode'              => false,
     ]);
@@ -341,6 +344,77 @@ check('Abwesend: LED an, Szene 2, "nur Abwesend" an',
 Sim::update(THILO, true);
 check('Unscharf: alles zurück', Sim::$vars[1001]['value'] === false && Sim::$vars[1003]['value'] === false);
 check('System Armed weiterhin geschaltet', Sim::$vars[ARMED]['value'] === false);
+
+echo "Ausgangsverzögerung Nacht und Countdown\n";
+function countdowns(): array
+{
+    return array_values(array_map(fn ($a) => $a[1], array_filter(Sim::$actions, fn ($a) => $a[0] === COUNTDOWN)));
+}
+function tick(Alarmanlage $m, int $seconds): void
+{
+    // Zeit vergeht: Deadline rückt näher, dann ein Countdown-Tick
+    $m->attributes['StepDeadline'] -= $seconds;
+    $m->RequestAction('CountdownElapsed', 0);
+}
+$m = setup();
+$m->properties['NightArmDelay'] = 30;
+Sim::update(REQUEST, true);
+check('Noch nicht scharf, Schritt armNight', mode($m) === 0 && $m->attributes['NextStep'] === 'armNight');
+check('Countdown startet mit 30s', countdowns() === ['Scharf in 30s']);
+check('Countdown-Timer läuft sekündlich', $m->timers['CountdownTimer'] === 1000);
+tick($m, 1);
+tick($m, 4);
+check('Countdown zählt herunter', countdowns() === ['Scharf in 30s', 'Scharf in 29s', 'Scharf in 25s']);
+check('System Armed während Verzögerung noch 0', Sim::$vars[ARMED]['value'] === false);
+Sim::update(DOOR, true);
+check('Kontakt während Verzögerung löst nichts aus', state($m) === 0);
+Sim::update(DOOR, false);
+Sim::reset();
+Sim::fireTimer();
+check('Nach Ablauf scharf', mode($m) === 2 && Sim::$vars[ARMED]['value'] === true);
+check('Countdown mit leerem Text zurückgenommen', countdowns() === [''] && $m->timers['CountdownTimer'] === 0);
+
+$m = setup();
+$m->properties['NightArmDelay'] = 30;
+Sim::update(REQUEST, true);
+Sim::reset();
+Sim::update(REQUEST, false);
+check('Scharf Request 0 bricht Verzögerung ab', mode($m) === 0 && $m->attributes['NextStep'] === '' && countdowns() === ['']);
+
+$m = setup();
+$m->properties['NightArmDelay'] = 30;
+Sim::update(REQUEST, true);
+$m->Disarm();
+check('ALARM_Disarm bricht Verzögerung ab', $m->attributes['NextStep'] === '');
+
+echo "Countdown Abwesend und Voralarm\n";
+$m = setup();
+Sim::update(THILO, false);
+Sim::update(NADINE, false);
+check('Abwesend-Verzögerung im Format m:ss', countdowns() === ['Scharf in 5:00']);
+tick($m, 61);
+check('Nach 61 s', end(Sim::$actions)[1] === 'Scharf in 3:59');
+Sim::update(NADINE, true);
+check('Heimkommen nimmt Countdown zurück', end(Sim::$actions) === [COUNTDOWN, '']);
+
+$m = setup();
+armAway();
+Sim::reset();
+Sim::update(DOOR, true);
+tick($m, 10);
+check('Voralarm-Countdown', countdowns() === ['Alarm in 30s', 'Alarm in 20s']);
+Sim::fireTimer();
+check('Bei Alarm zurückgenommen', end(Sim::$actions) !== null && countdowns() === ['Alarm in 30s', 'Alarm in 20s', '']);
+
+$m = setup();
+$m->properties['CountdownTimeOnly'] = true;
+$m->properties['CountdownArm'] = false;
+armAway();
+check('Schärf-Countdown abgewählt', countdowns() === []);
+Sim::update(DOOR, true);
+check('Nur Zeit', countdowns() === ['30s']);
+scan(1, 3);
+check('ekey während Voralarm nimmt Countdown zurück', countdowns() === ['30s', '']);
 
 echo $failures === 0 ? "\nAlle Tests bestanden.\n" : "\n$failures Test(s) fehlgeschlagen.\n";
 exit($failures === 0 ? 0 : 1);

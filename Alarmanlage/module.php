@@ -51,10 +51,15 @@ class Alarmanlage extends IPSModule
         $this->RegisterPropertyInteger('SirenDelay', 15);
         $this->RegisterPropertyInteger('SirenDuration', 180);
         $this->RegisterPropertyInteger('AwayArmDelay', 300);
+        $this->RegisterPropertyInteger('NightArmDelay', 30);
 
         $this->RegisterPropertyString('TextOutputs', '[]');
         $this->RegisterPropertyBoolean('TextReplaceUmlauts', true);
         $this->RegisterPropertyInteger('TextInfoDuration', 30);
+        $this->RegisterPropertyString('CountdownOutputs', '[]');
+        $this->RegisterPropertyBoolean('CountdownArm', true);
+        $this->RegisterPropertyBoolean('CountdownPreAlarm', true);
+        $this->RegisterPropertyBoolean('CountdownTimeOnly', false);
         foreach (self::TEXT_CATEGORIES as $category) {
             $this->RegisterPropertyBoolean('Text' . $category, true);
         }
@@ -70,9 +75,12 @@ class Alarmanlage extends IPSModule
         $this->RegisterAttributeString('LastEkeyScan', '');
         $this->RegisterAttributeString('TriggerSource', '');
         $this->RegisterAttributeString('LastText', '');
+        $this->RegisterAttributeString('LastCountdownText', '');
+        $this->RegisterAttributeInteger('StepDeadline', 0);
 
         $this->RegisterTimer('StepTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'TimerElapsed\', 0);');
         $this->RegisterTimer('TextTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'TextTimerElapsed\', 0);');
+        $this->RegisterTimer('CountdownTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'CountdownElapsed\', 0);');
 
         $this->ensureProfiles();
         $this->RegisterVariableInteger('Mode', 'Modus', 'Alarm.Mode', 10);
@@ -145,6 +153,7 @@ class Alarmanlage extends IPSModule
             if ($this->ReadAttributeString('NextStep') !== '' && $this->GetTimerInterval('StepTimer') === 0) {
                 $this->SetTimerInterval('StepTimer', 1000);
             }
+            $this->updateCountdown();
         });
 
         if ($missing) {
@@ -186,6 +195,12 @@ class Alarmanlage extends IPSModule
                 });
                 break;
 
+            case 'CountdownElapsed':
+                $this->lock(function () {
+                    $this->updateCountdown();
+                });
+                break;
+
             case 'Mode':
                 if (!$this->ReadPropertyBoolean('AllowVisuControl')) {
                     throw new Exception('Modus darf nicht über die Visualisierung geschaltet werden.');
@@ -198,7 +213,9 @@ class Alarmanlage extends IPSModule
                         $this->ArmAway();
                         break;
                     case self::MODE_NIGHT:
-                        $this->ArmNight();
+                        $this->lock(function () {
+                            $this->requestArmNight();
+                        });
                         break;
                 }
                 break;
@@ -229,6 +246,8 @@ class Alarmanlage extends IPSModule
         $this->lock(function () {
             if ($this->mode() !== self::MODE_OFF) {
                 $this->doDisarm('Manuell unscharf geschaltet.');
+            } elseif ($this->ReadAttributeString('NextStep') === 'armNight') {
+                $this->cancelArmNight('Manuell abgebrochen.');
             }
         });
     }
@@ -289,6 +308,11 @@ class Alarmanlage extends IPSModule
                     $this->doArm(self::MODE_AWAY);
                 }
                 break;
+            case 'armNight':
+                if ($this->mode() === self::MODE_OFF) {
+                    $this->doArm(self::MODE_NIGHT);
+                }
+                break;
             case 'alarm':
                 if ($this->state() === self::STATE_PREALARM) {
                     $this->startAlarm(false);
@@ -311,10 +335,15 @@ class Alarmanlage extends IPSModule
 
         if ($value) {
             if ($mode === self::MODE_OFF) {
-                $this->doArm(self::MODE_NIGHT);
+                $this->requestArmNight();
             } else {
                 $this->updateArmedOutputs();
             }
+            return;
+        }
+
+        if ($mode === self::MODE_OFF && $this->ReadAttributeString('NextStep') === 'armNight') {
+            $this->cancelArmNight('Über Scharf Request abgebrochen.');
             return;
         }
 
@@ -324,6 +353,28 @@ class Alarmanlage extends IPSModule
             $this->log('Scharf Request 0 ignoriert: "Abwesend" wird nur über Anwesenheit unscharf.');
             $this->updateArmedOutputs();
         }
+    }
+
+    /** Schärft "Nacht" nach der Ausgangsverzögerung, bei 0 sofort. */
+    private function requestArmNight(): void
+    {
+        if ($this->mode() !== self::MODE_OFF || $this->ReadAttributeString('NextStep') === 'armNight') {
+            return;
+        }
+        $delay = $this->ReadPropertyInteger('NightArmDelay');
+        if ($delay <= 0) {
+            $this->doArm(self::MODE_NIGHT);
+            return;
+        }
+        $this->log("Scharf (Nacht) in $delay s.");
+        $this->setTimer('armNight', $delay);
+    }
+
+    private function cancelArmNight(string $reason): void
+    {
+        $this->clearTimer();
+        $this->updateArmedOutputs();
+        $this->log("Scharfschaltung (Nacht) abgebrochen. $reason");
     }
 
     private function onPresence(string $name, bool $value): void
@@ -717,14 +768,40 @@ class Alarmanlage extends IPSModule
 
     private function setTimer(string $next, int $seconds): void
     {
+        $seconds = max(1, $seconds);
         $this->WriteAttributeString('NextStep', $next);
-        $this->SetTimerInterval('StepTimer', max(1, $seconds) * 1000);
+        $this->WriteAttributeInteger('StepDeadline', time() + $seconds);
+        $this->SetTimerInterval('StepTimer', $seconds * 1000);
+        $this->updateCountdown();
     }
 
     private function clearTimer(): void
     {
         $this->SetTimerInterval('StepTimer', 0);
         $this->WriteAttributeString('NextStep', '');
+        $this->updateCountdown();
+    }
+
+    /** Zweite Textausgabe: Restzeit von Schärf-Verzögerung und Voralarm, sekündlich aktualisiert. */
+    private function updateCountdown(): void
+    {
+        $next = $this->ReadAttributeString('NextStep');
+        $active = (in_array($next, ['armAway', 'armNight'], true) && $this->ReadPropertyBoolean('CountdownArm'))
+            || ($next === 'alarm' && $this->ReadPropertyBoolean('CountdownPreAlarm'));
+
+        if (!$active || !$this->listProperty('CountdownOutputs')) {
+            $this->SetTimerInterval('CountdownTimer', 0);
+            $this->sendText('', 'CountdownOutputs', 'LastCountdownText');
+            return;
+        }
+
+        $remaining = max(0, $this->ReadAttributeInteger('StepDeadline') - time());
+        $time = $remaining >= 60 ? sprintf('%d:%02d', intdiv($remaining, 60), $remaining % 60) : "{$remaining}s";
+        if (!$this->ReadPropertyBoolean('CountdownTimeOnly')) {
+            $time = ($next === 'alarm' ? 'Alarm in ' : 'Scharf in ') . $time;
+        }
+        $this->sendText($time, 'CountdownOutputs', 'LastCountdownText');
+        $this->SetTimerInterval('CountdownTimer', 1000);
     }
 
     private function appendTrigger(string $text): void
@@ -831,7 +908,7 @@ class Alarmanlage extends IPSModule
                 $ids[] = (int) ($row['BrightnessVariableID'] ?? 0);
             }
         }
-        foreach (['Shutters', 'TextOutputs', 'ArmedOutputs'] as $property) {
+        foreach (['Shutters', 'TextOutputs', 'CountdownOutputs', 'ArmedOutputs'] as $property) {
             foreach ($this->listProperty($property) as $row) {
                 $ids[] = (int) $row['VariableID'];
             }
@@ -874,9 +951,9 @@ class Alarmanlage extends IPSModule
         $this->SetTimerInterval('TextTimer', $duration > 0 ? $duration * 1000 : 0);
     }
 
-    private function sendText(string $text): void
+    private function sendText(string $text, string $outputsProperty = 'TextOutputs', string $lastAttribute = 'LastText'): void
     {
-        $outputs = $this->listProperty('TextOutputs');
+        $outputs = $this->listProperty($outputsProperty);
         if (!$outputs) {
             return;
         }
@@ -885,10 +962,10 @@ class Alarmanlage extends IPSModule
             $text = preg_replace('/[^\x20-\x7E]/', '', $text);
         }
         $text = mb_substr($text, 0, 14);
-        if ($text === $this->ReadAttributeString('LastText')) {
+        if ($text === $this->ReadAttributeString($lastAttribute)) {
             return;
         }
-        $this->WriteAttributeString('LastText', $text);
+        $this->WriteAttributeString($lastAttribute, $text);
         foreach ($outputs as $row) {
             $this->act((int) $row['VariableID'], $text);
         }
