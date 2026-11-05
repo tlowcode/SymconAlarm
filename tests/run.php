@@ -319,5 +319,28 @@ Sim::update(WINDOW, true);
 $all = texts();
 check('Ohne Ersetzung bleiben Umlaute erhalten', end($all) === 'ALARM Haustür');
 
+echo "Weitere Statusvariablen\n";
+$m = setup();
+Sim::addVar(1001, 'LED Taster', VARIABLETYPE_BOOLEAN, false);
+Sim::addVar(1002, 'Szene', VARIABLETYPE_INTEGER, 0);
+Sim::addVar(1003, 'Nur Abwesend', VARIABLETYPE_BOOLEAN, false);
+$m->properties['ArmedOutputs'] = json_encode([
+    ['VariableID' => 1001, 'ArmedValue' => 1, 'DisarmedValue' => 0, 'Mode' => 0],
+    ['VariableID' => 1002, 'ArmedValue' => 5, 'DisarmedValue' => 2, 'Mode' => 2],
+    ['VariableID' => 1003, 'ArmedValue' => 1, 'DisarmedValue' => 0, 'Mode' => 1],
+]);
+$m->ApplyChanges();
+check('Unscharf: Werte für unscharf', Sim::$vars[1001]['value'] === false && Sim::$vars[1002]['value'] === 2);
+Sim::update(REQUEST, true);
+check('Nacht: LED an, Szene 5, "nur Abwesend" bleibt aus',
+    Sim::$vars[1001]['value'] === true && Sim::$vars[1002]['value'] === 5 && Sim::$vars[1003]['value'] === false);
+Sim::update(REQUEST, false);
+armAway();
+check('Abwesend: LED an, Szene 2, "nur Abwesend" an',
+    Sim::$vars[1001]['value'] === true && Sim::$vars[1002]['value'] === 2 && Sim::$vars[1003]['value'] === true);
+Sim::update(THILO, true);
+check('Unscharf: alles zurück', Sim::$vars[1001]['value'] === false && Sim::$vars[1003]['value'] === false);
+check('System Armed weiterhin geschaltet', Sim::$vars[ARMED]['value'] === false);
+
 echo $failures === 0 ? "\nAlle Tests bestanden.\n" : "\n$failures Test(s) fehlgeschlagen.\n";
 exit($failures === 0 ? 0 : 1);

@@ -32,6 +32,7 @@ class Alarmanlage extends IPSModule
 
         $this->RegisterPropertyInteger('ArmRequestVariableID', 0);
         $this->RegisterPropertyInteger('ArmedStatusVariableID', 0);
+        $this->RegisterPropertyString('ArmedOutputs', '[]');
         $this->RegisterPropertyBoolean('RequestCanDisarmAway', false);
 
         $this->RegisterPropertyInteger('EkeyUserVariableID', 0);
@@ -137,7 +138,7 @@ class Alarmanlage extends IPSModule
 
         $this->lock(function () {
             $this->reconcileContacts();
-            $this->setArmedStatus($this->mode() !== self::MODE_OFF);
+            $this->updateArmedOutputs();
             $this->refreshDisplay();
 
             // Nach Neustart: einen offenen Schritt (Voralarm, Sirene aus ...) zeitnah nachholen
@@ -312,7 +313,7 @@ class Alarmanlage extends IPSModule
             if ($mode === self::MODE_OFF) {
                 $this->doArm(self::MODE_NIGHT);
             } else {
-                $this->setArmedStatus(true);
+                $this->updateArmedOutputs();
             }
             return;
         }
@@ -321,7 +322,7 @@ class Alarmanlage extends IPSModule
             $this->doDisarm('Über Scharf Request unscharf geschaltet.');
         } elseif ($mode === self::MODE_AWAY) {
             $this->log('Scharf Request 0 ignoriert: "Abwesend" wird nur über Anwesenheit unscharf.');
-            $this->setArmedStatus(true);
+            $this->updateArmedOutputs();
         }
     }
 
@@ -493,7 +494,7 @@ class Alarmanlage extends IPSModule
         $this->SetValue('State', self::STATE_IDLE);
         $this->SetValue('Trigger', '');
         $this->updateExcluded();
-        $this->setArmedStatus(true);
+        $this->updateArmedOutputs();
 
         $label = $mode === self::MODE_AWAY ? 'Abwesend' : 'Nacht';
         $text = "Scharf ($label).";
@@ -524,7 +525,7 @@ class Alarmanlage extends IPSModule
         $this->SetValue('State', self::STATE_IDLE);
         $this->SetValue('Trigger', '');
         $this->updateExcluded();
-        $this->setArmedStatus(false);
+        $this->updateArmedOutputs();
         $this->refreshDisplay();
         $this->showInfo('Disarmed', 'Unscharf');
 
@@ -640,11 +641,18 @@ class Alarmanlage extends IPSModule
         }
     }
 
-    private function setArmedStatus(bool $armed): void
+    /** Setzt "System Armed" und alle Statusvariablen der Liste passend zum aktuellen Modus. */
+    private function updateArmedOutputs(): void
     {
+        $mode = $this->mode();
         $id = $this->ReadPropertyInteger('ArmedStatusVariableID');
         if ($id > 0) {
-            $this->act($id, $armed);
+            $this->act($id, $mode !== self::MODE_OFF);
+        }
+        foreach ($this->listProperty('ArmedOutputs') as $row) {
+            $rowMode = (int) ($row['Mode'] ?? 0);
+            $armed = $mode !== self::MODE_OFF && ($rowMode === 0 || $rowMode === $mode);
+            $this->act((int) $row['VariableID'], $armed ? ($row['ArmedValue'] ?? 1) : ($row['DisarmedValue'] ?? 0));
         }
     }
 
@@ -823,7 +831,7 @@ class Alarmanlage extends IPSModule
                 $ids[] = (int) ($row['BrightnessVariableID'] ?? 0);
             }
         }
-        foreach (['Shutters', 'TextOutputs'] as $property) {
+        foreach (['Shutters', 'TextOutputs', 'ArmedOutputs'] as $property) {
             foreach ($this->listProperty($property) as $row) {
                 $ids[] = (int) $row['VariableID'];
             }

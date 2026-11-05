@@ -99,6 +99,51 @@
                     "caption": "System Armed (Status)"
                 },
                 {
+                    "type": "List",
+                    "name": "ArmedOutputs",
+                    "caption": "Weitere Statusvariablen für scharf/unscharf (Schalten: 1/0, Werte: beliebig)",
+                    "rowCount": 5,
+                    "add": true,
+                    "delete": true,
+                    "columns": [
+                        {
+                            "caption": "Variable",
+                            "name": "VariableID",
+                            "width": "300px",
+                            "add": 0,
+                            "edit": { "type": "SelectVariable" }
+                        },
+                        {
+                            "caption": "Wert scharf",
+                            "name": "ArmedValue",
+                            "width": "120px",
+                            "add": 1,
+                            "edit": { "type": "NumberSpinner" }
+                        },
+                        {
+                            "caption": "Wert unscharf",
+                            "name": "DisarmedValue",
+                            "width": "120px",
+                            "add": 0,
+                            "edit": { "type": "NumberSpinner" }
+                        },
+                        {
+                            "caption": "Gilt als scharf bei",
+                            "name": "Mode",
+                            "width": "auto",
+                            "add": 0,
+                            "edit": {
+                                "type": "Select",
+                                "options": [
+                                    { "caption": "Abwesend und Nacht", "value": 0 },
+                                    { "caption": "nur Abwesend", "value": 1 },
+                                    { "caption": "nur Nacht", "value": 2 }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
                     "type": "CheckBox",
                     "name": "RequestCanDisarmAway",
                     "caption": "Scharf Request 0 darf auch \"Abwesend\" unscharf schalten"
