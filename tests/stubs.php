@@ -22,10 +22,20 @@ class Sim
     public static array $pushes = [];
     public static ?IPSModule $module = null;
     public static int $now = 1000000;
+    public static array $instances = [];  // id => [ident => variableID]
+    public static array $config = [];     // Eigenschaften fremder Instanzen (z. B. WebHook Control)
 
     public static function addVar(int $id, string $name, int $type, $value, string $profile = ''): void
     {
         self::$vars[$id] = ['name' => $name, 'type' => $type, 'value' => $value, 'profile' => $profile, 'updated' => 0];
+    }
+
+    public static function addHueLight(int $instanceID, int $onID, int $colorID, int $brightnessID, bool $on = false, int $color = 0xFFFFFF, int $brightness = 50): void
+    {
+        self::$instances[$instanceID] = ['on' => $onID, 'color' => $colorID, 'brightness' => $brightnessID];
+        self::addVar($onID, 'Status', VARIABLETYPE_BOOLEAN, $on);
+        self::addVar($colorID, 'Farbe', VARIABLETYPE_INTEGER, $color);
+        self::addVar($brightnessID, 'Helligkeit', VARIABLETYPE_INTEGER, $brightness);
     }
 
     public static function reset(): void
@@ -139,7 +149,12 @@ class IPSModule
 function IPS_GetKernelRunlevel() { return KR_READY; }
 function IPS_VariableExists($id) { return isset(Sim::$vars[$id]); }
 function IPS_ObjectExists($id) { return isset(Sim::$vars[$id]); }
-function IPS_InstanceExists($id) { return $id === 77777; }
+function IPS_InstanceExists($id) { return $id === 77777 || isset(Sim::$instances[$id]); }
+function IPS_GetObjectIDByIdent($ident, $parentID) { return Sim::$instances[$parentID][$ident] ?? false; }
+function IPS_GetInstanceListByModuleID($moduleID) { return isset(Sim::$config[55555]) ? [55555] : []; }
+function IPS_GetProperty($id, $name) { return Sim::$config[$id][$name]; }
+function IPS_SetProperty($id, $name, $value) { Sim::$config[$id][$name] = $value; return true; }
+function IPS_ApplyChanges($id) { return true; }
 function IPS_GetName($id) { return Sim::$vars[$id]['name']; }
 function IPS_GetVariable($id)
 {

@@ -39,7 +39,9 @@ class Alarmanlage extends IPSModule
     private string $testNote = '';
 
     /** Kategorien der DPT16-Textausgabe, Property heißt jeweils "Text" + Schlüssel */
-    private const TEXT_CATEGORIES = ['Armed', 'Disarmed', 'Excluded', 'PreAlarm', 'Alarm', 'SirenOff', 'EkeyRejected', 'Reminder'];
+    private const TEXT_CATEGORIES = ['Armed', 'Disarmed', 'Excluded', 'PreAlarm', 'Alarm', 'SirenOff', 'EkeyRejected', 'Reminder', 'Perimeter'];
+    private const WEBHOOK_CONTROL = '{015A6EB8-D6E5-4B93-B496-0D3F77AE9FE1}';
+    private const PERIMETER_MODES = ['immer', 'nur scharf', 'nur Abwesend', 'nur Nacht'];
 
     private const STATUS_OK = 102;
     private const STATUS_NO_CONTACTS = 104;
@@ -86,6 +88,20 @@ class Alarmanlage extends IPSModule
         $this->RegisterPropertyInteger('SimOnMax', 90);
         $this->RegisterPropertyInteger('SimOffMin', 10);
         $this->RegisterPropertyInteger('SimOffMax', 60);
+
+        $this->RegisterPropertyString('WebHookName', 'alarm');
+        $this->RegisterPropertyString('WebHookToken', '');
+        $this->RegisterPropertyString('PerimeterHooks', '[]');
+        $this->RegisterPropertyInteger('PerimeterCooldown', 60);
+        $this->RegisterPropertyInteger('PerimeterDayVariableID', 0);
+        $this->RegisterPropertyInteger('PerimeterSignalSeconds', 30);
+
+        $this->RegisterPropertyString('SignalLights', '[]');
+        $this->RegisterPropertyInteger('SignalColor', 0xFF0000);
+        $this->RegisterPropertyInteger('SignalInterval', 1000);
+        $this->RegisterPropertyBoolean('SignalOnAlarm', true);
+        $this->RegisterPropertyBoolean('SignalOnPreAlarm', false);
+        $this->RegisterPropertyBoolean('SignalRestore', true);
 
         $this->RegisterPropertyString('Sirens', '[]');
         $this->RegisterPropertyString('AlarmLights', '[]');
@@ -135,6 +151,10 @@ class Alarmanlage extends IPSModule
         $this->RegisterAttributeString('TestLog', '{}');
         $this->RegisterAttributeBoolean('PreAlarmEntry', false);
         $this->RegisterAttributeBoolean('BlinkOn', false);
+        $this->RegisterAttributeString('PerimeterLast', '{}');
+        $this->RegisterAttributeInteger('SignalUntil', 0);
+        $this->RegisterAttributeBoolean('SignalOn', false);
+        $this->RegisterAttributeString('SignalSaved', '{}');
         $this->RegisterAttributeInteger('ReminderCount', 0);
         $this->RegisterAttributeString('SimState', '{}');
 
@@ -143,6 +163,7 @@ class Alarmanlage extends IPSModule
         $this->RegisterTimer('CountdownTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'CountdownElapsed\', 0);');
         $this->RegisterTimer('ReminderTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'ReminderElapsed\', 0);');
         $this->RegisterTimer('BlinkTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'BlinkElapsed\', 0);');
+        $this->RegisterTimer('SignalTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'SignalElapsed\', 0);');
         $this->RegisterTimer('SimTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'SimElapsed\', 0);');
 
         $this->ensureProfiles();
@@ -204,6 +225,19 @@ class Alarmanlage extends IPSModule
             }
             $this->RegisterReference($id);
         }
+        foreach ($this->listProperty('SignalLights') as $row) {
+            $instanceID = (int) ($row['InstanceID'] ?? 0);
+            if ($instanceID <= 0) {
+                continue;
+            }
+            if (!IPS_InstanceExists($instanceID) || !$this->hueVariables($instanceID)) {
+                $missing[] = $instanceID;
+                continue;
+            }
+            $this->RegisterReference($instanceID);
+        }
+        $this->ensureWebHook();
+
         $scriptID = $this->ReadPropertyInteger('SilentAlarmScriptID');
         if ($scriptID > 0) {
             if (IPS_ScriptExists($scriptID)) {
@@ -242,13 +276,19 @@ class Alarmanlage extends IPSModule
         });
 
         if ($missing) {
-            $this->LogMessage('Variablen existieren nicht: ' . implode(', ', array_unique($missing)), KL_WARNING);
+            $this->LogMessage('Variablen oder Instanzen existieren nicht: ' . implode(', ', array_unique($missing)), KL_WARNING);
             $this->SetStatus(self::STATUS_MISSING_VARIABLE);
         } elseif (!$this->contacts()) {
             $this->SetStatus(self::STATUS_NO_CONTACTS);
         } else {
             $this->SetStatus(self::STATUS_OK);
         }
+    }
+
+    public function GetConfigurationForm()
+    {
+        $form = file_get_contents(__DIR__ . '/form.json');
+        return str_replace('{HOOK}', $this->hookPath(), $form);
     }
 
     public function MessageSink($TimeStamp, $SenderID, $Message, $Data)
@@ -295,6 +335,12 @@ class Alarmanlage extends IPSModule
             case 'BlinkElapsed':
                 $this->lock(function () {
                     $this->blink();
+                });
+                break;
+
+            case 'SignalElapsed':
+                $this->lock(function () {
+                    $this->signalTick();
                 });
                 break;
 
@@ -430,7 +476,7 @@ class Alarmanlage extends IPSModule
             $this->dispatchVariable($id, $value, $changed);
             return;
         }
-        $before = [$this->mode(), $this->state(), count($this->readIDs('PendingContacts')), $this->ReadAttributeString('NextStep')];
+        $before = $this->testBefore();
         $this->testNote = '';
         $this->dispatchVariable($id, $value, $changed);
         $this->recordTestEvent($id, $value, $changed, $before);
@@ -734,6 +780,11 @@ class Alarmanlage extends IPSModule
         return (is_array($log) ? $log : []) + ['sensors' => [], 'events' => []];
     }
 
+    private function testBefore(): array
+    {
+        return [$this->mode(), $this->state(), count($this->readIDs('PendingContacts')), $this->ReadAttributeString('NextStep')];
+    }
+
     private function testCsvPath(): string
     {
         return IPS_GetLogDir() . 'Alarmanlage_' . $this->InstanceID . '_Test.csv';
@@ -741,7 +792,13 @@ class Alarmanlage extends IPSModule
 
     private function recordTestEvent(int $id, $value, bool $changed, array $before): void
     {
-        [$type, $name, $text, $wouldTrigger] = $this->describeTestEvent($id, $value, $changed);
+        $this->writeTestEvent((string) $id, $this->describeTestEvent($id, $value, $changed), $before);
+    }
+
+    /** @param array{string, string, string, bool} $event Typ, Name, Wert als Text, wäre ein Auslöser */
+    private function writeTestEvent(string $key, array $event, array $before): void
+    {
+        [$type, $name, $text, $wouldTrigger] = $event;
         if ($type === '') {
             return;
         }
@@ -764,7 +821,6 @@ class Alarmanlage extends IPSModule
 
         $now = time();
         $log = $this->testLog();
-        $key = (string) $id;
         $sensor = $log['sensors'][$key] ?? ['type' => $type, 'name' => $name, 'events' => 0, 'triggers' => 0, 'flaps' => 0, 'last' => 0];
         $flap = in_array($type, self::FLAP_TYPES, true)
             && $sensor['last'] > 0 && $now - $sensor['last'] < $this->ReadPropertyInteger('TestFlapSeconds');
@@ -1172,6 +1228,260 @@ class Alarmanlage extends IPSModule
         $this->SetValue('State', self::STATE_LATCHED);
         $this->notify('Alarm', 'Sirene abgeschaltet. Anlage bleibt im Alarmzustand, bis unscharf geschaltet wird.');
         $this->showInfo('SirenOff', 'Sirene aus');
+    }
+
+    // ---------- Perimeter (WebHooks) ----------
+
+    private function hookPath(): string
+    {
+        $name = trim($this->ReadPropertyString('WebHookName'), " /");
+        return '/hook/' . ($name !== '' ? $name : 'alarm');
+    }
+
+    /** Trägt den WebHook in der WebHook Control ein (bzw. entfernt ihn, wenn keine Auslöser konfiguriert sind). */
+    private function ensureWebHook(): void
+    {
+        $ids = IPS_GetInstanceListByModuleID(self::WEBHOOK_CONTROL);
+        if (!$ids) {
+            if ($this->listProperty('PerimeterHooks')) {
+                $this->LogMessage('Keine WebHook Control gefunden, Perimeter-WebHooks sind nicht erreichbar.', KL_WARNING);
+            }
+            return;
+        }
+        $wanted = $this->listProperty('PerimeterHooks') ? $this->hookPath() : '';
+        $hooks = json_decode(IPS_GetProperty($ids[0], 'Hooks'), true) ?: [];
+        $new = [];
+        $found = false;
+        foreach ($hooks as $hook) {
+            if ($hook['Hook'] === $wanted) {
+                if ($hook['TargetID'] !== $this->InstanceID) {
+                    $this->LogMessage("WebHook $wanted gehörte Objekt {$hook['TargetID']} und wird übernommen.", KL_WARNING);
+                }
+                $hook['TargetID'] = $this->InstanceID;
+                $found = true;
+            } elseif ($hook['TargetID'] === $this->InstanceID) {
+                continue;
+            }
+            $new[] = $hook;
+        }
+        if ($wanted !== '' && !$found) {
+            $new[] = ['Hook' => $wanted, 'TargetID' => $this->InstanceID];
+        }
+        if ($new !== $hooks) {
+            IPS_SetProperty($ids[0], 'Hooks', json_encode($new));
+            IPS_ApplyChanges($ids[0]);
+        }
+    }
+
+    /** Aufruf: /hook/alarm/<Schlüssel> oder /hook/alarm?trigger=<Schlüssel>, optional &token=... und &state=0 (Ende, wird ignoriert). */
+    protected function ProcessHookData()
+    {
+        $hook = (string) ($_SERVER['HOOK'] ?? $this->hookPath());
+        $path = (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH);
+        $key = strpos($path, $hook) === 0 ? trim(substr($path, strlen($hook)), '/') : '';
+        if ($key === '') {
+            $key = (string) ($_GET['trigger'] ?? '');
+        }
+
+        $token = $this->ReadPropertyString('WebHookToken');
+        if ($token !== '' && !hash_equals($token, (string) ($_GET['token'] ?? ''))) {
+            @http_response_code(403);
+            $this->log("WebHook ohne gültigen Token abgelehnt ($key).");
+            echo 'Forbidden';
+            return;
+        }
+
+        $row = null;
+        foreach ($this->listProperty('PerimeterHooks') as $candidate) {
+            if (strcasecmp(trim((string) ($candidate['Key'] ?? '')), $key) === 0) {
+                $row = $candidate;
+                break;
+            }
+        }
+        if ($row === null) {
+            @http_response_code(404);
+            $this->SendDebug('WebHook', "Unbekannter Auslöser \"$key\"", 0);
+            echo 'Unknown trigger';
+            return;
+        }
+
+        $state = strtolower((string) ($_GET['state'] ?? '1'));
+        if (!in_array($state, ['0', 'false', 'off', 'end', 'stop'], true)) {
+            $this->lock(function () use ($row) {
+                $this->onPerimeterHook($row);
+            });
+        }
+        echo 'OK';
+    }
+
+    private function onPerimeterHook(array $row): void
+    {
+        $test = $this->ReadPropertyBoolean('TestMode');
+        $before = $test ? $this->testBefore() : [];
+        $this->testNote = '';
+        $this->onPerimeter($row);
+        if ($test) {
+            $key = trim((string) $row['Key']);
+            $this->writeTestEvent('hook:' . $key, ['Perimeter', $this->perimeterName($row), $this->testNote, false], $before);
+        }
+    }
+
+    private function perimeterName(array $row): string
+    {
+        $name = trim((string) ($row['Name'] ?? ''));
+        return $name !== '' ? $name : trim((string) $row['Key']);
+    }
+
+    private function onPerimeter(array $row): void
+    {
+        $name = $this->perimeterName($row);
+        $mode = $this->mode();
+        $active = [
+            0 => true,
+            1 => $mode !== self::MODE_OFF,
+            2 => $mode === self::MODE_AWAY,
+            3 => $mode === self::MODE_NIGHT,
+        ][(int) ($row['Modes'] ?? 0)] ?? true;
+        if (!$active) {
+            $this->testNote = 'ignoriert (' . self::PERIMETER_MODES[(int) $row['Modes']] . ')';
+            $this->SendDebug('Perimeter', "$name ignoriert: Modus " . self::MODE_LABELS[$mode], 0);
+            return;
+        }
+        if (($row['DarkOnly'] ?? false) && $this->isDaylight()) {
+            $this->testNote = 'ignoriert (Tag)';
+            $this->SendDebug('Perimeter', "$name ignoriert: Tag", 0);
+            return;
+        }
+
+        if ($row['Signal'] ?? true) {
+            $until = time() + $this->ReadPropertyInteger('PerimeterSignalSeconds');
+            $this->WriteAttributeInteger('SignalUntil', max($until, $this->ReadAttributeInteger('SignalUntil')));
+        }
+
+        $key = strtolower(trim((string) $row['Key']));
+        $last = json_decode($this->ReadAttributeString('PerimeterLast'), true) ?: [];
+        if (time() - ($last[$key] ?? 0) < $this->ReadPropertyInteger('PerimeterCooldown')) {
+            $this->testNote = 'gemeldet (Sperrzeit, kein Push)';
+            return;
+        }
+        $last[$key] = time();
+        $this->WriteAttributeString('PerimeterLast', json_encode($last));
+        $this->testNote = 'gemeldet';
+
+        $this->showInfo('Perimeter', "Perimeter $name");
+        if ($row['Push'] ?? true) {
+            $this->notify('Perimeter', "Auslösung: $name", 'buzzer');
+        } else {
+            $this->log("Perimeter: $name");
+        }
+    }
+
+    private function isDaylight(): bool
+    {
+        $id = $this->ReadPropertyInteger('PerimeterDayVariableID') ?: $this->ReadPropertyInteger('SimDayVariableID');
+        return $id > 0 && IPS_VariableExists($id) && (bool) GetValue($id);
+    }
+
+    // ---------- Signallampen (z. B. Hue im Garten) ----------
+
+    /** @return array{on: int, color: int, brightness: int}|null Variablen einer Lampen-/Gruppeninstanz (Philips HUE V2) */
+    private function hueVariables(int $instanceID): ?array
+    {
+        $on = @IPS_GetObjectIDByIdent('on', $instanceID);
+        $color = @IPS_GetObjectIDByIdent('color', $instanceID);
+        if (!$on || !$color) {
+            return null;
+        }
+        return ['on' => $on, 'color' => $color, 'brightness' => (int) @IPS_GetObjectIDByIdent('brightness', $instanceID)];
+    }
+
+    /** @return array<int, array{on: int, color: int, brightness: int}> */
+    private function signalLights(): array
+    {
+        $lights = [];
+        foreach ($this->listProperty('SignalLights') as $row) {
+            $instanceID = (int) ($row['InstanceID'] ?? 0);
+            if ($instanceID > 0 && IPS_InstanceExists($instanceID) && ($vars = $this->hueVariables($instanceID))) {
+                $lights[$instanceID] = $vars;
+            }
+        }
+        return $lights;
+    }
+
+    private function signalWanted(): bool
+    {
+        $state = $this->state();
+        return ($this->ReadPropertyBoolean('SignalOnAlarm') && ($state === self::STATE_ALARM || $state === self::STATE_SIREN))
+            || ($this->ReadPropertyBoolean('SignalOnPreAlarm') && $state === self::STATE_PREALARM)
+            || time() < $this->ReadAttributeInteger('SignalUntil');
+    }
+
+    /** Startet oder beendet das Blinken der Signallampen passend zum Zustand. */
+    private function updateSignal(): void
+    {
+        $running = $this->GetTimerInterval('SignalTimer') > 0;
+        $lights = $this->signalLights();
+        $wanted = $lights && $this->signalWanted();
+
+        if ($wanted && !$running) {
+            $saved = [];
+            foreach ($lights as $instanceID => $vars) {
+                $saved[$instanceID] = [
+                    'on'         => (bool) GetValue($vars['on']),
+                    'color'      => (int) GetValue($vars['color']),
+                    'brightness' => $vars['brightness'] > 0 ? (int) GetValue($vars['brightness']) : 0,
+                ];
+            }
+            $this->WriteAttributeString('SignalSaved', json_encode($saved));
+            foreach ($lights as $vars) {
+                $this->act($vars['color'], $this->ReadPropertyInteger('SignalColor'));
+                if ($vars['brightness'] > 0) {
+                    $this->act($vars['brightness'], 100);
+                }
+            }
+            $this->WriteAttributeBoolean('SignalOn', true);
+            $this->SetTimerInterval('SignalTimer', max(500, $this->ReadPropertyInteger('SignalInterval')));
+        } elseif (!$wanted && $running) {
+            $this->SetTimerInterval('SignalTimer', 0);
+            $this->WriteAttributeInteger('SignalUntil', 0);
+            $this->restoreSignalLights($lights);
+        }
+    }
+
+    private function signalTick(): void
+    {
+        if (!$this->signalWanted()) {
+            return;
+        }
+        $on = !$this->ReadAttributeBoolean('SignalOn');
+        $this->WriteAttributeBoolean('SignalOn', $on);
+        foreach ($this->signalLights() as $vars) {
+            // "color" schaltet die Lampe zugleich ein, so reicht ein Befehl je Takt
+            if ($on) {
+                $this->act($vars['color'], $this->ReadPropertyInteger('SignalColor'));
+            } else {
+                $this->act($vars['on'], false);
+            }
+        }
+    }
+
+    private function restoreSignalLights(array $lights): void
+    {
+        $saved = json_decode($this->ReadAttributeString('SignalSaved'), true) ?: [];
+        $this->WriteAttributeString('SignalSaved', '{}');
+        foreach ($lights as $instanceID => $vars) {
+            $before = $saved[$instanceID] ?? null;
+            if ($before === null || !$this->ReadPropertyBoolean('SignalRestore')) {
+                $this->act($vars['on'], false);
+                continue;
+            }
+            // Hue übernimmt Farbe und Helligkeit nur im eingeschalteten Zustand, daher erst setzen, dann ggf. aus
+            $this->act($vars['color'], $before['color']);
+            if ($vars['brightness'] > 0 && $before['brightness'] > 0) {
+                $this->act($vars['brightness'], $before['brightness']);
+            }
+            $this->act($vars['on'], $before['on']);
+        }
     }
 
     // ---------- Überfall und Panik ----------
@@ -1717,6 +2027,7 @@ class Alarmanlage extends IPSModule
         try {
             $fn();
             $this->updateBlink();
+            $this->updateSignal();
             $this->syncStatusVariables();
         } finally {
             IPS_SemaphoreLeave($key);

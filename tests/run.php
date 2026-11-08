@@ -24,6 +24,8 @@ function check(string $label, bool $ok): void
 function setup(): Alarmanlage
 {
     Sim::$vars = [];
+    Sim::$instances = [];
+    Sim::$config = [55555 => ['Hooks' => json_encode([['Hook' => '/hook/other', 'TargetID' => 123]])]];
     Sim::$profiles = ['Hue.Brightness' => ['MaxValue' => 254]];
     Sim::reset();
     Sim::addVar(DOOR, 'Haustür', VARIABLETYPE_BOOLEAN, false);
@@ -712,6 +714,111 @@ $m->ApplyChanges();
 armAway();
 Sim::update(DOOR, true);
 check('Blinken abgeschaltet: Lampe dauerhaft an', $m->timers['BlinkTimer'] === 0 && Sim::$vars[1501]['value'] === true);
+
+echo "Perimeter-WebHooks\n";
+function hook(Alarmanlage $m, string $uri, array $get = []): string
+{
+    $_SERVER['HOOK'] = '/hook/alarm';
+    $_SERVER['REQUEST_URI'] = $uri;
+    $_GET = $get;
+    ob_start();
+    (new ReflectionMethod($m, 'ProcessHookData'))->invoke($m);
+    return (string) ob_get_clean();
+}
+function hooks(): array { return json_decode(Sim::$config[55555]['Hooks'], true); }
+
+$m = setup();
+check('Ohne Auslöser kein WebHook', hooks() === [['Hook' => '/hook/other', 'TargetID' => 123]]);
+$m->properties['PerimeterHooks'] = json_encode([
+    ['Key' => 'einfahrt', 'Name' => 'Kamera Einfahrt', 'Modes' => 0, 'DarkOnly' => false, 'Push' => true, 'Signal' => false],
+    ['Key' => 'garten', 'Name' => 'Kamera Garten', 'Modes' => 1, 'DarkOnly' => true, 'Push' => true, 'Signal' => false],
+]);
+Sim::addVar(1601, 'Es ist Tag', VARIABLETYPE_BOOLEAN, false);
+$m->properties['PerimeterDayVariableID'] = 1601;
+$m->ApplyChanges();
+check('WebHook /hook/alarm eingetragen, fremde bleiben', hooks() === [['Hook' => '/hook/other', 'TargetID' => 123], ['Hook' => '/hook/alarm', 'TargetID' => 99999]]);
+$m->ApplyChanges();
+check('Kein doppelter Eintrag', count(hooks()) === 2);
+Sim::reset();
+check('Aufruf per Pfad', hook($m, '/hook/alarm/einfahrt') === 'OK' && (bool) preg_grep('/^Perimeter: Auslösung: Kamera Einfahrt/', Sim::$pushes));
+check('DPT16 Hinweis', in_array('Perimeter Kame', texts(), true));
+Sim::reset();
+hook($m, '/hook/alarm?trigger=einfahrt', ['trigger' => 'einfahrt']);
+check('Sperrzeit: kein zweiter Push', Sim::$pushes === []);
+check('Unbekannter Auslöser', hook($m, '/hook/alarm', ['trigger' => 'xyz']) === 'Unknown trigger');
+hook($m, '/hook/alarm', ['trigger' => 'garten']);
+check('"nur scharf": unscharf ignoriert', Sim::$pushes === []);
+check('Kein Alarm durch Perimeter', state($m) === 0);
+Sim::update(REQUEST, true);
+Sim::fireTimer();
+Sim::update(1601, true);
+hook($m, '/hook/alarm', ['trigger' => 'garten']);
+check('"nur bei Dunkelheit": tagsüber ignoriert', !preg_grep('/Garten/', Sim::$pushes));
+Sim::update(1601, false);
+hook($m, '/hook/alarm', ['trigger' => 'garten', 'state' => '0']);
+check('state=0 (Ende) ignoriert', !preg_grep('/Garten/', Sim::$pushes));
+hook($m, '/hook/alarm', ['trigger' => 'GARTEN']);
+check('Scharf und dunkel: gemeldet, Groß/klein egal', (bool) preg_grep('/Kamera Garten/', Sim::$pushes) && state($m) === 0);
+$m->properties['WebHookToken'] = 'geheim';
+Sim::reset();
+check('Token fehlt: abgelehnt', hook($m, '/hook/alarm/einfahrt') === 'Forbidden' && Sim::$pushes === []);
+$m->attributes['PerimeterLast'] = '{}';
+check('Token korrekt', hook($m, '/hook/alarm/einfahrt', ['token' => 'geheim']) === 'OK' && count(Sim::$pushes) === 1);
+$m->properties['PerimeterHooks'] = '[]';
+$m->ApplyChanges();
+check('Auslöser entfernt: WebHook ausgetragen', hooks() === [['Hook' => '/hook/other', 'TargetID' => 123]]);
+
+echo "Hue-Signallampen\n";
+function signalSetup(): Alarmanlage
+{
+    $m = setup();
+    Sim::addHueLight(2001, 2011, 2012, 2013, false, 0x00FF00, 40);
+    Sim::addHueLight(2002, 2021, 2022, 2023, true, 0xFFAA55, 80);
+    $m->properties['SignalLights'] = json_encode([['InstanceID' => 2001], ['InstanceID' => 2002]]);
+    $m->properties['PerimeterHooks'] = json_encode([['Key' => 'cam', 'Name' => 'Kamera', 'Modes' => 0, 'DarkOnly' => false, 'Push' => false, 'Signal' => true]]);
+    $m->ApplyChanges();
+    return $m;
+}
+$m = signalSetup();
+check('Instanzen gültig', $m->status === 102);
+armAway();
+Sim::update(DOOR, true);
+check('Voralarm: Signallampen noch aus (Standard)', $m->timers['SignalTimer'] === 0);
+Sim::fireTimer();
+check('Alarm: rot, 100 %, Blinktimer 1000 ms', Sim::$vars[2012]['value'] === 0xFF0000 && Sim::$vars[2013]['value'] === 100
+    && Sim::$vars[2022]['value'] === 0xFF0000 && $m->timers['SignalTimer'] === 1000);
+$m->RequestAction('SignalElapsed', 0);
+check('Takt aus', Sim::$vars[2011]['value'] === false && Sim::$vars[2021]['value'] === false);
+Sim::$vars[2012]['value'] = 0;
+$m->RequestAction('SignalElapsed', 0);
+check('Takt wieder rot', Sim::$vars[2012]['value'] === 0xFF0000);
+Sim::fireTimer();
+check('Sirene läuft: blinkt weiter', state($m) === 3 && $m->timers['SignalTimer'] === 1000);
+Sim::update(THILO, true);
+check('Unscharf: Blinken endet', $m->timers['SignalTimer'] === 0);
+check('Lampe 1 zurück: grün, 40 %, aus', Sim::$vars[2012]['value'] === 0x00FF00 && Sim::$vars[2013]['value'] === 40 && Sim::$vars[2011]['value'] === false);
+check('Lampe 2 zurück: Farbe, 80 %, an', Sim::$vars[2022]['value'] === 0xFFAA55 && Sim::$vars[2023]['value'] === 80 && Sim::$vars[2021]['value'] === true);
+
+$m = signalSetup();
+hook($m, '/hook/alarm/cam');
+check('Perimeter: Signallampen blinken', $m->timers['SignalTimer'] === 1000 && Sim::$vars[2012]['value'] === 0xFF0000);
+$m->attributes['SignalUntil'] = time() - 1;
+$m->RequestAction('SignalElapsed', 0);
+check('Nach Ablauf: Ende und wiederhergestellt', $m->timers['SignalTimer'] === 0 && Sim::$vars[2012]['value'] === 0x00FF00 && Sim::$vars[2011]['value'] === false);
+
+$m = signalSetup();
+$m->properties['SignalRestore'] = false;
+$m->properties['SignalOnPreAlarm'] = true;
+armAway();
+Sim::update(DOOR, true);
+check('Voralarm-Option: blinkt schon im Voralarm', $m->timers['SignalTimer'] === 1000);
+Sim::update(THILO, true);
+check('Ohne Wiederherstellen: alle aus', Sim::$vars[2011]['value'] === false && Sim::$vars[2021]['value'] === false);
+
+$m = setup();
+$m->properties['SignalLights'] = json_encode([['InstanceID' => 4711]]);
+$m->ApplyChanges();
+check('Fehlende Hue-Instanz: Status 201', $m->status === 201);
 
 echo $failures === 0 ? "\nAlle Tests bestanden.\n" : "\n$failures Test(s) fehlgeschlagen.\n";
 exit($failures === 0 ? 0 : 1);

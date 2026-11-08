@@ -397,6 +397,187 @@
         },
         {
             "type": "ExpansionPanel",
+            "caption": "Perimeter-Warnung (WebHooks, z. B. Außenkameras)",
+            "items": [
+                {
+                    "type": "ValidationTextBox",
+                    "name": "WebHookName",
+                    "caption": "WebHook-Name (/hook/...)"
+                },
+                {
+                    "type": "PasswordTextBox",
+                    "name": "WebHookToken",
+                    "caption": "Token (optional, als &token=... anhängen)"
+                },
+                {
+                    "type": "Label",
+                    "caption": "Aufruf: http://<Symcon-IP>:3777{HOOK}?trigger=<Schlüssel> oder http://<Symcon-IP>:3777{HOOK}/<Schlüssel>. Ein Aufruf mit &state=0 (Ende der Bewegung) wird ignoriert."
+                },
+                {
+                    "type": "List",
+                    "name": "PerimeterHooks",
+                    "caption": "Auslöser",
+                    "rowCount": 5,
+                    "add": true,
+                    "delete": true,
+                    "columns": [
+                        {
+                            "caption": "Schlüssel",
+                            "name": "Key",
+                            "width": "160px",
+                            "add": "",
+                            "edit": {
+                                "type": "ValidationTextBox"
+                            }
+                        },
+                        {
+                            "caption": "Name",
+                            "name": "Name",
+                            "width": "auto",
+                            "add": "",
+                            "edit": {
+                                "type": "ValidationTextBox"
+                            }
+                        },
+                        {
+                            "caption": "Aktiv",
+                            "name": "Modes",
+                            "width": "150px",
+                            "add": 0,
+                            "edit": {
+                                "type": "Select",
+                                "options": [
+                                    {
+                                        "caption": "immer",
+                                        "value": 0
+                                    },
+                                    {
+                                        "caption": "nur scharf",
+                                        "value": 1
+                                    },
+                                    {
+                                        "caption": "nur Abwesend",
+                                        "value": 2
+                                    },
+                                    {
+                                        "caption": "nur Nacht",
+                                        "value": 3
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "caption": "Nur bei Dunkelheit",
+                            "name": "DarkOnly",
+                            "width": "160px",
+                            "add": false,
+                            "edit": {
+                                "type": "CheckBox"
+                            }
+                        },
+                        {
+                            "caption": "Push",
+                            "name": "Push",
+                            "width": "80px",
+                            "add": true,
+                            "edit": {
+                                "type": "CheckBox"
+                            }
+                        },
+                        {
+                            "caption": "Signallampen",
+                            "name": "Signal",
+                            "width": "130px",
+                            "add": true,
+                            "edit": {
+                                "type": "CheckBox"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "PerimeterCooldown",
+                    "caption": "Sperrzeit für erneuten Push je Auslöser",
+                    "suffix": "s",
+                    "minimum": 0
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "PerimeterSignalSeconds",
+                    "caption": "Signallampen blinken nach Perimeter",
+                    "suffix": "s",
+                    "minimum": 1
+                },
+                {
+                    "type": "SelectVariable",
+                    "name": "PerimeterDayVariableID",
+                    "caption": "Tag-Variable (true = Tag; leer = die der Anwesenheitssimulation)"
+                },
+                {
+                    "type": "Label",
+                    "caption": "Perimeter-Meldungen lösen keinen Alarm aus. Sie melden per Push, DPT16-Hinweis und Signallampen."
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "Signallampen (Philips HUE V2, z. B. Garten)",
+            "items": [
+                {
+                    "type": "List",
+                    "name": "SignalLights",
+                    "caption": "Hue-Lampen oder -Gruppen (Instanz)",
+                    "rowCount": 5,
+                    "add": true,
+                    "delete": true,
+                    "columns": [
+                        {
+                            "caption": "Instanz",
+                            "name": "InstanceID",
+                            "width": "auto",
+                            "add": 0,
+                            "edit": {
+                                "type": "SelectInstance"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "type": "SelectColor",
+                    "name": "SignalColor",
+                    "caption": "Farbe"
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "SignalInterval",
+                    "caption": "Blinktakt (je Phase an/aus)",
+                    "suffix": "ms",
+                    "minimum": 500
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "SignalOnAlarm",
+                    "caption": "Bei Alarm blinken (bis Sirene aus oder unscharf)"
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "SignalOnPreAlarm",
+                    "caption": "Schon im Voralarm blinken"
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "SignalRestore",
+                    "caption": "Danach vorherigen Zustand wiederherstellen (Ein/Aus, Farbe, Helligkeit), sonst ausschalten"
+                },
+                {
+                    "type": "Label",
+                    "caption": "Pro Lampe gehen je Takt ein Befehl an die Bridge. Bei vielen Lampen lieber eine Hue-Gruppe (Zone \"Garten\") eintragen oder den Takt verlängern."
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
             "caption": "KNX Textausgabe (DPT16, max. 14 Zeichen)",
             "items": [
                 {
@@ -477,6 +658,11 @@
                     "type": "CheckBox",
                     "name": "TextReminder",
                     "caption": "Erinnerung Schärfen vergessen (\"Nicht scharf!\")"
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "TextPerimeter",
+                    "caption": "Perimeter-Meldung (\"Perimeter ...\")"
                 },
                 {
                     "type": "Label",
