@@ -13,7 +13,8 @@ Alarmanlage als IP-Symcon-Modul (ab Symcon 7.0) für KNX-Kontakte, Bewegungsmeld
 - Status „System Armed“ wird an KNX zurückgemeldet. Zusätzlich lassen sich beliebig viele Variablen mit eigenen Werten für scharf/unscharf schalten, wahlweise nur für Abwesend oder nur für Nacht.
 - KNX-Textausgabe (DPT16, 14 Zeichen) auf beliebig viele Textvariablen; pro Meldungsart abschaltbar. Zustandsmeldungen (Alarm, Voralarm, ausgeklammerte Kontakte) bleiben stehen, bis der Zustand endet; Hinweise (Scharf, Unscharf, Kontakt überwacht, Sirene aus, ekey abgelehnt) werden nach einstellbarer Zeit ausgeblendet. Zurückgenommen wird jeweils mit leerem Text.
 - Zweite DPT16-Ausgabe als Countdown („Scharf in 25s“, „Alarm in 25s“) während Schärf-Verzögerung und Voralarm, sekündlich aktualisiert.
-- Testmodus: Sirenen werden nur protokolliert, nicht geschaltet (bei neuen Instanzen aktiv).
+- **Apple HomeKit:** Sicherheitssystem mit Zuhause/Abwesend/Nacht/Aus über die HomeKit Bridge (Modul „Apple HomeKit“ ≥ 1.6). Wahlweise legt das Modul die Variable selbst an oder synchronisiert eine vorhandene. Die Variable „Alarm ausgelöst“ dient als AlarmID.
+- **Testmodus:** Sirenen werden nur protokolliert, nicht geschaltet (bei neuen Instanzen aktiv). Alle Sensorereignisse werden mit Reaktion der Anlage protokolliert: Statistik pro Sensor (Ereignisse, Auslösungen, Flattern), die letzten Ereignisse als HTML-Variable „Testprotokoll“ und optional als CSV im Symcon-Log-Ordner (`Alarmanlage_<InstanzID>_Test.csv`).
 
 ## Installation
 
@@ -29,6 +30,8 @@ ALARM_ArmNight(int $InstanzID);
 ALARM_ArmAway(int $InstanzID);
 ALARM_Disarm(int $InstanzID);
 ALARM_GetStatusText(int $InstanzID): string;
+ALARM_GetTestReport(int $InstanzID): string;
+ALARM_ResetTestLog(int $InstanzID);
 ```
 
 ## Tests

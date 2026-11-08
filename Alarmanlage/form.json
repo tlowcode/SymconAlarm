@@ -431,11 +431,68 @@
                     "type": "CheckBox",
                     "name": "AllowVisuControl",
                     "caption": "Modus über die Visualisierung schaltbar"
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "Apple HomeKit Sicherheitssystem",
+            "items": [
+                {
+                    "type": "Select",
+                    "name": "HomeKitSource",
+                    "caption": "HomeKit-Variable",
+                    "options": [
+                        { "caption": "Keine", "value": 0 },
+                        { "caption": "Vom Modul anlegen (in der HomeKit Bridge auswählen)", "value": 1 },
+                        { "caption": "Vorhandene Variable verwenden", "value": 2 }
+                    ]
+                },
+                {
+                    "type": "SelectVariable",
+                    "name": "HomeKitVariableID",
+                    "caption": "Vorhandene Variable (Integer, Profil SecuritySystem.HomeKit)"
+                },
+                {
+                    "type": "Select",
+                    "name": "HomeKitHomeAs",
+                    "caption": "HomeKit \"Zuhause\" bedeutet",
+                    "options": [
+                        { "caption": "Scharf (Nacht)", "value": 2 },
+                        { "caption": "Ignorieren", "value": -1 }
+                    ]
                 },
                 {
                     "type": "CheckBox",
+                    "name": "HomeKitCanDisarmAway",
+                    "caption": "HomeKit \"Aus\" darf auch \"Abwesend\" unscharf schalten"
+                },
+                {
+                    "type": "Label",
+                    "caption": "Für \"Alarm ausgelöst\" in HomeKit die Modulvariable \"Alarm ausgelöst\" als AlarmID in der Bridge eintragen."
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "Testmodus und Sensorprotokoll",
+            "items": [
+                {
+                    "type": "CheckBox",
                     "name": "TestMode",
-                    "caption": "Testmodus (Sirenen werden nicht geschaltet, nur protokolliert)"
+                    "caption": "Testmodus (Sirenen werden nicht geschaltet, alle Sensorereignisse werden protokolliert)"
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "TestFlapSeconds",
+                    "caption": "Als Flattern werten, wenn ein Sensor schneller wechselt als",
+                    "suffix": " s",
+                    "minimum": 1
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "TestLogCsv",
+                    "caption": "Zusätzlich als CSV-Datei im Symcon-Log-Ordner speichern"
                 }
             ]
         }
@@ -444,7 +501,9 @@
         { "type": "Button", "caption": "Scharf (Nacht)", "onClick": "ALARM_ArmNight($id);" },
         { "type": "Button", "caption": "Scharf (Abwesend)", "onClick": "ALARM_ArmAway($id);" },
         { "type": "Button", "caption": "Unscharf", "onClick": "ALARM_Disarm($id);" },
-        { "type": "Button", "caption": "Status anzeigen", "onClick": "echo ALARM_GetStatusText($id);" }
+        { "type": "Button", "caption": "Status anzeigen", "onClick": "echo ALARM_GetStatusText($id);" },
+        { "type": "Button", "caption": "Testprotokoll anzeigen", "onClick": "echo ALARM_GetTestReport($id);" },
+        { "type": "Button", "caption": "Testprotokoll löschen", "onClick": "ALARM_ResetTestLog($id); echo 'Testprotokoll gelöscht.';" }
     ],
     "status": [
         { "code": 102, "icon": "active", "caption": "Alarmanlage bereit" },

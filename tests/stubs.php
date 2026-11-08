@@ -97,6 +97,9 @@ class IPSModule
     protected function ReadAttributeString($n) { return $this->attributes[$n]; }
     protected function WriteAttributeString($n, $v) { $this->attributes[$n] = $v; }
     protected function RegisterAttributeInteger($n, $v) { $this->attributes[$n] = $v; }
+    protected function RegisterAttributeBoolean($n, $v) { $this->attributes[$n] = $v; }
+    protected function ReadAttributeBoolean($n) { return $this->attributes[$n]; }
+    protected function WriteAttributeBoolean($n, $v) { $this->attributes[$n] = $v; }
     protected function ReadAttributeInteger($n) { return $this->attributes[$n]; }
     protected function WriteAttributeInteger($n, $v) { $this->attributes[$n] = $v; }
 
@@ -106,9 +109,18 @@ class IPSModule
 
     protected function RegisterVariableInteger($i, $n, $p, $pos) { $this->values[$i] = 0; }
     protected function RegisterVariableString($i, $n, $p, $pos) { $this->values[$i] = ''; }
+    protected function RegisterVariableBoolean($i, $n, $p, $pos) { $this->values[$i] = false; }
+    protected function MaintainVariable($i, $n, $t, $p, $pos, $keep)
+    {
+        if (!$keep) {
+            unset($this->values[$i]);
+        } elseif (!array_key_exists($i, $this->values)) {
+            $this->values[$i] = [VARIABLETYPE_BOOLEAN => false, VARIABLETYPE_INTEGER => 0, VARIABLETYPE_FLOAT => 0.0, VARIABLETYPE_STRING => ''][$t];
+        }
+    }
     protected function GetValue($i) { return $this->values[$i]; }
     protected function SetValue($i, $v) { $this->values[$i] = $v; }
-    protected function GetIDForIdent($i) { return $i; }
+    protected function GetIDForIdent($i) { return array_key_exists($i, $this->values) ? $i : false; }
     protected function EnableAction($i) {}
     protected function DisableAction($i) {}
 
@@ -132,7 +144,7 @@ function IPS_GetName($id) { return Sim::$vars[$id]['name']; }
 function IPS_GetVariable($id)
 {
     $v = Sim::$vars[$id];
-    return ['VariableType' => $v['type'], 'VariableProfile' => $v['profile'], 'VariableCustomProfile' => '', 'VariableUpdated' => $v['updated']];
+    return ['VariableType' => $v['type'], 'VariableProfile' => $v['profile'], 'VariableCustomProfile' => '', 'VariableUpdated' => $v['updated'], 'VariableAction' => $v['action'] ?? 0];
 }
 function IPS_VariableProfileExists($n) { return isset(Sim::$profiles[$n]); }
 function IPS_GetVariableProfile($n) { return Sim::$profiles[$n]; }
@@ -141,6 +153,18 @@ function IPS_SetVariableProfileAssociation($n, $v, $t, $i, $c) {}
 function IPS_SemaphoreEnter($k, $t) { return true; }
 function IPS_SemaphoreLeave($k) { return true; }
 function GetValue($id) { return Sim::$vars[$id]['value']; }
+function SetValue($id, $value)
+{
+    Sim::$vars[$id]['value'] = $value;
+    Sim::$actions[] = [$id, $value];
+    return true;
+}
+function IPS_GetLogDir()
+{
+    $dir = __DIR__ . '/.tmp/';
+    @mkdir($dir);
+    return $dir;
+}
 function GetValueFormatted($id) { return (string) Sim::$module->values[$id]; }
 function RequestAction($id, $value)
 {

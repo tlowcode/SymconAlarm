@@ -14,6 +14,24 @@ class Alarmanlage extends IPSModule
     private const STATE_SIREN = 3;
     private const STATE_LATCHED = 4;
 
+    private const MODE_LABELS = ['Unscharf', 'Abwesend', 'Nacht'];
+    private const STATE_LABELS = ['Ruhe', 'Voralarm', 'Alarm', 'Alarm – Sirene', 'Alarm ausgelöst'];
+
+    /** Werte des HomeKit-Sicherheitssystems (Profil SecuritySystem.HomeKit) */
+    private const HK_HOME = 0;
+    private const HK_AWAY = 1;
+    private const HK_NIGHT = 2;
+    private const HK_OFF = 3;
+
+    private const HOMEKIT_NONE = 0;
+    private const HOMEKIT_OWN = 1;
+    private const HOMEKIT_EXTERNAL = 2;
+
+    private const TEST_LOG_MAX = 200;
+
+    /** Anmerkung zu einem ekey-Scan für das Testprotokoll, gesetzt während der Auswertung */
+    private string $testNote = '';
+
     /** Kategorien der DPT16-Textausgabe, Property heißt jeweils "Text" + Schlüssel */
     private const TEXT_CATEGORIES = ['Armed', 'Disarmed', 'Excluded', 'PreAlarm', 'Alarm', 'SirenOff', 'EkeyRejected'];
 
@@ -68,6 +86,13 @@ class Alarmanlage extends IPSModule
         $this->RegisterPropertyBoolean('NotifyArmDisarm', true);
         $this->RegisterPropertyBoolean('AllowVisuControl', false);
         $this->RegisterPropertyBoolean('TestMode', true);
+        $this->RegisterPropertyInteger('TestFlapSeconds', 5);
+        $this->RegisterPropertyBoolean('TestLogCsv', true);
+
+        $this->RegisterPropertyInteger('HomeKitSource', self::HOMEKIT_NONE);
+        $this->RegisterPropertyInteger('HomeKitVariableID', 0);
+        $this->RegisterPropertyInteger('HomeKitHomeAs', self::HK_NIGHT);
+        $this->RegisterPropertyBoolean('HomeKitCanDisarmAway', true);
 
         $this->RegisterAttributeString('ActiveContacts', '[]');
         $this->RegisterAttributeString('PendingContacts', '[]');
@@ -77,6 +102,9 @@ class Alarmanlage extends IPSModule
         $this->RegisterAttributeString('LastText', '');
         $this->RegisterAttributeString('LastCountdownText', '');
         $this->RegisterAttributeInteger('StepDeadline', 0);
+        $this->RegisterAttributeBoolean('HomeKitHome', false);
+        $this->RegisterAttributeString('HomeKitWrites', '[]');
+        $this->RegisterAttributeString('TestLog', '{}');
 
         $this->RegisterTimer('StepTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'TimerElapsed\', 0);');
         $this->RegisterTimer('TextTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'TextTimerElapsed\', 0);');
@@ -87,6 +115,7 @@ class Alarmanlage extends IPSModule
         $this->RegisterVariableInteger('State', 'Zustand', 'Alarm.State', 20);
         $this->RegisterVariableString('Trigger', 'Auslöser', '', 30);
         $this->RegisterVariableString('Excluded', 'Ausgeklammerte Kontakte', '', 40);
+        $this->RegisterVariableBoolean('AlarmActive', 'Alarm ausgelöst', '~Alert', 25);
     }
 
     public function ApplyChanges()
@@ -117,7 +146,8 @@ class Alarmanlage extends IPSModule
             array_keys($this->motionSensors()),
             array_keys($this->presence()),
             [$this->ReadPropertyInteger('ArmRequestVariableID')],
-            $this->ekeyIDs()
+            $this->ekeyIDs(),
+            [$this->externalHomeKitID()]
         );
         foreach ($watch as $id) {
             if ($id <= 0) {
@@ -138,6 +168,13 @@ class Alarmanlage extends IPSModule
             $this->RegisterReference($id);
         }
 
+        $ownHomeKit = $this->ReadPropertyInteger('HomeKitSource') === self::HOMEKIT_OWN;
+        $this->MaintainVariable('HomeKit', 'HomeKit Sicherheitssystem', VARIABLETYPE_INTEGER, 'SecuritySystem.HomeKit', 50, $ownHomeKit);
+        if ($ownHomeKit) {
+            $this->EnableAction('HomeKit');
+        }
+        $this->MaintainVariable('TestReport', 'Testprotokoll', VARIABLETYPE_STRING, '~HTMLBox', 60, $this->ReadPropertyBoolean('TestMode'));
+
         if ($this->ReadPropertyBoolean('AllowVisuControl')) {
             $this->EnableAction('Mode');
         } else {
@@ -148,6 +185,7 @@ class Alarmanlage extends IPSModule
             $this->reconcileContacts();
             $this->updateArmedOutputs();
             $this->refreshDisplay();
+            $this->updateTestReport();
 
             // Nach Neustart: einen offenen Schritt (Voralarm, Sirene aus ...) zeitnah nachholen
             if ($this->ReadAttributeString('NextStep') !== '' && $this->GetTimerInterval('StepTimer') === 0) {
@@ -192,6 +230,12 @@ class Alarmanlage extends IPSModule
             case 'TextTimerElapsed':
                 $this->lock(function () {
                     $this->refreshDisplay();
+                });
+                break;
+
+            case 'HomeKit':
+                $this->lock(function () use ($Value) {
+                    $this->onHomeKit((int) $Value);
                 });
                 break;
 
@@ -246,10 +290,38 @@ class Alarmanlage extends IPSModule
         $this->lock(function () {
             if ($this->mode() !== self::MODE_OFF) {
                 $this->doDisarm('Manuell unscharf geschaltet.');
-            } elseif ($this->ReadAttributeString('NextStep') === 'armNight') {
-                $this->cancelArmNight('Manuell abgebrochen.');
+            } elseif ($this->isArmPending()) {
+                $this->cancelPendingArm('Manuell abgebrochen.');
             }
         });
+    }
+
+    public function ResetTestLog(): void
+    {
+        $this->lock(function () {
+            $this->WriteAttributeString('TestLog', '{}');
+            $file = $this->testCsvPath();
+            if (file_exists($file)) {
+                unlink($file);
+            }
+            $this->updateTestReport();
+        });
+    }
+
+    public function GetTestReport(): string
+    {
+        $log = $this->testLog();
+        if (!$log['sensors']) {
+            return 'Noch keine Ereignisse protokolliert.';
+        }
+        $lines = [];
+        foreach ($log['sensors'] as $sensor) {
+            $lines[] = sprintf(
+                '%s %s: %d Ereignisse, %d Auslösungen, %d Flattern, zuletzt %s',
+                $sensor['type'], $sensor['name'], $sensor['events'], $sensor['triggers'], $sensor['flaps'], date('d.m.Y H:i:s', $sensor['last'])
+            );
+        }
+        return implode("\n", $lines) . "\nCSV: " . $this->testCsvPath();
     }
 
     public function GetStatusText(): string
@@ -270,6 +342,24 @@ class Alarmanlage extends IPSModule
 
     private function onVariable(int $id, $value, bool $changed): void
     {
+        if (!$this->ReadPropertyBoolean('TestMode')) {
+            $this->dispatchVariable($id, $value, $changed);
+            return;
+        }
+        $before = [$this->mode(), $this->state(), count($this->readIDs('PendingContacts')), $this->ReadAttributeString('NextStep')];
+        $this->testNote = '';
+        $this->dispatchVariable($id, $value, $changed);
+        $this->recordTestEvent($id, $value, $changed, $before);
+    }
+
+    private function dispatchVariable(int $id, $value, bool $changed): void
+    {
+        if ($id === $this->externalHomeKitID()) {
+            if ($changed && !$this->isOwnHomeKitWrite((int) $value)) {
+                $this->onHomeKit((int) $value);
+            }
+            return;
+        }
         if ($id === $this->ReadPropertyInteger('ArmRequestVariableID')) {
             // Jede Aktualisierung zählt, damit eine erneute 1 nach Unscharf über Anwesenheit ankommt
             $this->onArmRequest((bool) $value);
@@ -313,6 +403,11 @@ class Alarmanlage extends IPSModule
                     $this->doArm(self::MODE_NIGHT);
                 }
                 break;
+            case 'armAwayManual':
+                if ($this->mode() !== self::MODE_AWAY && $this->state() === self::STATE_IDLE) {
+                    $this->doArm(self::MODE_AWAY);
+                }
+                break;
             case 'alarm':
                 if ($this->state() === self::STATE_PREALARM) {
                     $this->startAlarm(false);
@@ -335,6 +430,7 @@ class Alarmanlage extends IPSModule
 
         if ($value) {
             if ($mode === self::MODE_OFF) {
+                $this->WriteAttributeBoolean('HomeKitHome', false);
                 $this->requestArmNight();
             } else {
                 $this->updateArmedOutputs();
@@ -342,8 +438,8 @@ class Alarmanlage extends IPSModule
             return;
         }
 
-        if ($mode === self::MODE_OFF && $this->ReadAttributeString('NextStep') === 'armNight') {
-            $this->cancelArmNight('Über Scharf Request abgebrochen.');
+        if ($mode === self::MODE_OFF && $this->isArmPending()) {
+            $this->cancelPendingArm('Über Scharf Request abgebrochen.');
             return;
         }
 
@@ -370,11 +466,256 @@ class Alarmanlage extends IPSModule
         $this->setTimer('armNight', $delay);
     }
 
-    private function cancelArmNight(string $reason): void
+    /** Schärft "Abwesend" auf Anforderung (HomeKit) nach der Ausgangsverzögerung, unabhängig von der Anwesenheit. */
+    private function requestArmAwayManual(): void
+    {
+        if ($this->mode() === self::MODE_AWAY || $this->state() !== self::STATE_IDLE || $this->ReadAttributeString('NextStep') === 'armAwayManual') {
+            return;
+        }
+        $delay = $this->ReadPropertyInteger('NightArmDelay');
+        if ($delay <= 0) {
+            $this->doArm(self::MODE_AWAY);
+            return;
+        }
+        $this->log("Scharf (Abwesend) in $delay s.");
+        $this->setTimer('armAwayManual', $delay);
+    }
+
+    private function isArmPending(): bool
+    {
+        return in_array($this->ReadAttributeString('NextStep'), ['armNight', 'armAwayManual'], true);
+    }
+
+    private function cancelPendingArm(string $reason): void
     {
         $this->clearTimer();
+        $this->WriteAttributeBoolean('HomeKitHome', false);
         $this->updateArmedOutputs();
-        $this->log("Scharfschaltung (Nacht) abgebrochen. $reason");
+        $this->log("Scharfschaltung abgebrochen. $reason");
+    }
+
+    // ---------- HomeKit ----------
+
+    private function onHomeKit(int $value): void
+    {
+        $mode = $this->mode();
+        switch ($value) {
+            case self::HK_OFF:
+                if ($mode === self::MODE_NIGHT || ($mode === self::MODE_AWAY && $this->ReadPropertyBoolean('HomeKitCanDisarmAway'))) {
+                    $this->doDisarm('Über HomeKit unscharf geschaltet.');
+                } elseif ($mode === self::MODE_AWAY) {
+                    $this->log('HomeKit "Aus" ignoriert: "Abwesend" darf über HomeKit nicht unscharf geschaltet werden.');
+                } elseif ($this->isArmPending()) {
+                    $this->cancelPendingArm('Über HomeKit abgebrochen.');
+                }
+                break;
+
+            case self::HK_HOME:
+                if ($this->ReadPropertyInteger('HomeKitHomeAs') !== self::HK_NIGHT) {
+                    $this->log('HomeKit "Zuhause" ignoriert (nicht zugeordnet).');
+                    break;
+                }
+                $this->WriteAttributeBoolean('HomeKitHome', true);
+                $this->requestArmNight();
+                break;
+
+            case self::HK_NIGHT:
+                $this->WriteAttributeBoolean('HomeKitHome', false);
+                $this->requestArmNight();
+                break;
+
+            case self::HK_AWAY:
+                $this->requestArmAwayManual();
+                break;
+        }
+    }
+
+    private function homeKitValue(): int
+    {
+        $nightValue = $this->ReadAttributeBoolean('HomeKitHome') ? self::HK_HOME : self::HK_NIGHT;
+        switch ($this->mode()) {
+            case self::MODE_AWAY:
+                return self::HK_AWAY;
+            case self::MODE_NIGHT:
+                return $nightValue;
+        }
+        switch ($this->ReadAttributeString('NextStep')) {
+            case 'armNight':
+                return $nightValue;
+            case 'armAwayManual':
+                return self::HK_AWAY;
+        }
+        return self::HK_OFF;
+    }
+
+    /** Hält HomeKit-Variable und "Alarm ausgelöst" auf dem aktuellen Stand. */
+    private function syncStatusVariables(): void
+    {
+        $alarm = $this->state() >= self::STATE_ALARM;
+        if ($this->GetValue('AlarmActive') !== $alarm) {
+            $this->SetValue('AlarmActive', $alarm);
+        }
+
+        $value = $this->homeKitValue();
+        switch ($this->ReadPropertyInteger('HomeKitSource')) {
+            case self::HOMEKIT_OWN:
+                if ($this->GetValue('HomeKit') !== $value) {
+                    $this->SetValue('HomeKit', $value);
+                }
+                break;
+
+            case self::HOMEKIT_EXTERNAL:
+                $id = $this->externalHomeKitID();
+                if ($id <= 0 || !IPS_VariableExists($id) || GetValue($id) === $value) {
+                    break;
+                }
+                $writes = array_filter(json_decode($this->ReadAttributeString('HomeKitWrites'), true) ?: [], fn ($w) => $w[1] > time() - 10);
+                $writes[] = [$value, time()];
+                $this->WriteAttributeString('HomeKitWrites', json_encode(array_values($writes)));
+                if (IPS_GetVariable($id)['VariableAction'] > 0) {
+                    $this->act($id, $value);
+                } else {
+                    SetValue($id, $value);
+                }
+                break;
+        }
+    }
+
+    /** Eigene Schreibvorgänge kommen als Aktualisierung zurück und dürfen nicht als HomeKit-Befehl gelten. */
+    private function isOwnHomeKitWrite(int $value): bool
+    {
+        foreach (json_decode($this->ReadAttributeString('HomeKitWrites'), true) ?: [] as [$written, $time]) {
+            if ($written === $value && $time > time() - 10) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function externalHomeKitID(): int
+    {
+        return $this->ReadPropertyInteger('HomeKitSource') === self::HOMEKIT_EXTERNAL ? $this->ReadPropertyInteger('HomeKitVariableID') : 0;
+    }
+
+    // ---------- Testprotokoll ----------
+
+    private function testLog(): array
+    {
+        $log = json_decode($this->ReadAttributeString('TestLog'), true);
+        return (is_array($log) ? $log : []) + ['sensors' => [], 'events' => []];
+    }
+
+    private function testCsvPath(): string
+    {
+        return IPS_GetLogDir() . 'Alarmanlage_' . $this->InstanceID . '_Test.csv';
+    }
+
+    private function recordTestEvent(int $id, $value, bool $changed, array $before): void
+    {
+        [$type, $name, $text, $wouldTrigger] = $this->describeTestEvent($id, $value, $changed);
+        if ($type === '') {
+            return;
+        }
+
+        $reaction = [];
+        if ($this->mode() !== $before[0]) {
+            $reaction[] = 'Modus ' . self::MODE_LABELS[$before[0]] . ' → ' . self::MODE_LABELS[$this->mode()];
+        }
+        if ($this->state() !== $before[1]) {
+            $reaction[] = 'Zustand → ' . self::STATE_LABELS[$this->state()];
+        }
+        if (count($this->readIDs('PendingContacts')) < $before[2] && $this->mode() === $before[0]) {
+            $reaction[] = 'Kontakt jetzt überwacht';
+        }
+        $next = $this->ReadAttributeString('NextStep');
+        if ($next !== $before[3] && in_array($next, ['armAway', 'armNight', 'armAwayManual'], true)) {
+            $reaction[] = 'Scharfschaltung geplant';
+        }
+        $reaction = implode(', ', $reaction) ?: '-';
+
+        $now = time();
+        $log = $this->testLog();
+        $key = (string) $id;
+        $sensor = $log['sensors'][$key] ?? ['type' => $type, 'name' => $name, 'events' => 0, 'triggers' => 0, 'flaps' => 0, 'last' => 0];
+        $flap = $sensor['last'] > 0 && $now - $sensor['last'] < $this->ReadPropertyInteger('TestFlapSeconds');
+        $sensor['name'] = $name;
+        $sensor['events']++;
+        $sensor['triggers'] += $wouldTrigger ? 1 : 0;
+        $sensor['flaps'] += $flap ? 1 : 0;
+        $sensor['last'] = $now;
+        $log['sensors'][$key] = $sensor;
+
+        $entry = [$now, $type, $name, $text, self::MODE_LABELS[$this->mode()], $reaction, $flap];
+        array_unshift($log['events'], $entry);
+        $log['events'] = array_slice($log['events'], 0, self::TEST_LOG_MAX);
+        $this->WriteAttributeString('TestLog', json_encode($log));
+
+        $this->SendDebug('Test', "$type $name: $text | $reaction" . ($flap ? ' | FLATTERN' : ''), 0);
+        if ($this->ReadPropertyBoolean('TestLogCsv')) {
+            $file = $this->testCsvPath();
+            $line = implode(';', [date('Y-m-d H:i:s', $now), $type, $name, $text, $entry[4], $reaction, $flap ? 'ja' : 'nein']) . "\n";
+            if (!file_exists($file)) {
+                $line = "Zeit;Typ;Sensor;Wert;Modus;Reaktion;Flattern\n" . $line;
+            }
+            @file_put_contents($file, $line, FILE_APPEND);
+        }
+        $this->updateTestReport();
+    }
+
+    /** @return array{string, string, string, bool} Typ, Name, Wert als Text, wäre ein Auslöser */
+    private function describeTestEvent(int $id, $value, bool $changed): array
+    {
+        $contacts = $this->contacts();
+        $motion = $this->motionSensors();
+        $presence = $this->presence();
+
+        if (isset($contacts[$id]) && $changed) {
+            $open = (bool) $value === $this->ReadPropertyBoolean('ContactOpenValue');
+            return ['Kontakt', $contacts[$id], $open ? 'offen' : 'geschlossen', $open];
+        }
+        if (isset($motion[$id]) && $changed) {
+            return ['Bewegung', $motion[$id], $value ? 'Bewegung' : 'Ende', (bool) $value];
+        }
+        if (isset($presence[$id]) && $changed) {
+            return ['Anwesenheit', $presence[$id], $value ? 'zuhause' : 'weg', false];
+        }
+        if ($id === $this->ReadPropertyInteger('ArmRequestVariableID')) {
+            return ['KNX', 'Scharf Request', $value ? '1' : '0', false];
+        }
+        if ($id === $this->externalHomeKitID() && $changed) {
+            return ['HomeKit', 'Sicherheitssystem', ['Zuhause', 'Abwesend', 'Nacht', 'Aus'][(int) $value] ?? (string) $value, false];
+        }
+        if ($this->testNote !== '') {
+            return ['ekey', 'Fingerscanner', $this->testNote, false];
+        }
+        return ['', '', '', false];
+    }
+
+    private function updateTestReport(): void
+    {
+        if (!$this->ReadPropertyBoolean('TestMode') || @$this->GetIDForIdent('TestReport') === false) {
+            return;
+        }
+        $log = $this->testLog();
+        $esc = fn ($v) => htmlspecialchars((string) $v, ENT_QUOTES);
+        $style = 'style="border-collapse:collapse;width:100%" border="1" cellpadding="4"';
+
+        $html = '<b>Sensoren</b><table ' . $style . '><tr><th>Typ</th><th>Sensor</th><th>Ereignisse</th><th>Auslösungen</th><th>Flattern (&lt; '
+            . $this->ReadPropertyInteger('TestFlapSeconds') . ' s)</th><th>Zuletzt</th></tr>';
+        $sensors = $log['sensors'];
+        uasort($sensors, fn ($a, $b) => $b['flaps'] <=> $a['flaps'] ?: $b['triggers'] <=> $a['triggers']);
+        foreach ($sensors as $s) {
+            $warn = $s['flaps'] > 0 ? ' style="color:#d00;font-weight:bold"' : '';
+            $html .= "<tr><td>{$esc($s['type'])}</td><td>{$esc($s['name'])}</td><td>{$s['events']}</td><td>{$s['triggers']}</td><td$warn>{$s['flaps']}</td><td>"
+                . date('d.m. H:i:s', $s['last']) . '</td></tr>';
+        }
+        $html .= '</table><br><b>Letzte Ereignisse</b><table ' . $style . '><tr><th>Zeit</th><th>Typ</th><th>Sensor</th><th>Wert</th><th>Modus</th><th>Reaktion</th></tr>';
+        foreach (array_slice($log['events'], 0, 50) as [$time, $type, $name, $text, $mode, $reaction, $flap]) {
+            $warn = $flap ? ' style="color:#d00"' : '';
+            $html .= "<tr$warn><td>" . date('d.m. H:i:s', $time) . "</td><td>{$esc($type)}</td><td>{$esc($name)}</td><td>{$esc($text)}</td><td>{$esc($mode)}</td><td>{$esc($reaction)}</td></tr>";
+        }
+        $html .= '</table>';
+        $this->SetValue('TestReport', $html);
     }
 
     private function onPresence(string $name, bool $value): void
@@ -423,6 +764,7 @@ class Alarmanlage extends IPSModule
         $accepted = $actionID <= 0 || (int) GetValue($actionID) === $this->ReadPropertyInteger('EkeyActionValue');
         $name = $accepted ? $this->matchEkeyUser($user, $finger) : null;
 
+        $this->testNote = "Benutzer $user, Finger $finger: " . ($name === null ? 'abgelehnt' : "erkannt ($name)");
         if ($name === null) {
             $text = "Nicht berechtigter Fingerabdruck (Benutzer $user, Finger $finger).";
             if ($this->mode() !== self::MODE_OFF && $this->ReadPropertyBoolean('EkeyNotifyRejected')) {
@@ -572,6 +914,7 @@ class Alarmanlage extends IPSModule
 
         $this->writeIDs('ActiveContacts', []);
         $this->writeIDs('PendingContacts', []);
+        $this->WriteAttributeBoolean('HomeKitHome', false);
         $this->SetValue('Mode', self::MODE_OFF);
         $this->SetValue('State', self::STATE_IDLE);
         $this->SetValue('Trigger', '');
@@ -786,7 +1129,7 @@ class Alarmanlage extends IPSModule
     private function updateCountdown(): void
     {
         $next = $this->ReadAttributeString('NextStep');
-        $active = (in_array($next, ['armAway', 'armNight'], true) && $this->ReadPropertyBoolean('CountdownArm'))
+        $active = (in_array($next, ['armAway', 'armNight', 'armAwayManual'], true) && $this->ReadPropertyBoolean('CountdownArm'))
             || ($next === 'alarm' && $this->ReadPropertyBoolean('CountdownPreAlarm'));
 
         if (!$active || !$this->listProperty('CountdownOutputs')) {
@@ -995,6 +1338,7 @@ class Alarmanlage extends IPSModule
         }
         try {
             $fn();
+            $this->syncStatusVariables();
         } finally {
             IPS_SemaphoreLeave($key);
         }
@@ -1007,6 +1351,12 @@ class Alarmanlage extends IPSModule
                 [0, 'Unscharf', '', 0x00AA00],
                 [1, 'Scharf (Abwesend)', '', 0xFF0000],
                 [2, 'Scharf (Nacht)', '', 0xFF8800],
+            ],
+            'SecuritySystem.HomeKit' => [
+                [0, 'Zuhause', '', -1],
+                [1, 'Abwesend', '', -1],
+                [2, 'Nacht', '', -1],
+                [3, 'Aus', '', -1],
             ],
             'Alarm.State' => [
                 [0, 'Ruhe', '', 0x00AA00],
