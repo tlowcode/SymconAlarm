@@ -193,6 +193,17 @@ function IPS_RunScriptEx($id, $params)
     Sim::$actions[] = ['script', $id, $params['ALARM_REASON']];
     return true;
 }
+function PHUE_setColor($instanceID, $color, $params)
+{
+    $vars = Sim::$instances[$instanceID];
+    Sim::$vars[$vars['on']]['value'] = $params['on']['on'];
+    Sim::$vars[$vars['color']]['value'] = $color;
+    if (isset($params['dimming'])) {
+        Sim::$vars[$vars['brightness']]['value'] = $params['dimming']['brightness'];
+    }
+    Sim::$actions[] = ['hue', $instanceID, $color, $params];
+    return true;
+}
 function VISU_PostNotificationEx($id, $title, $text, $icon, $sound, $target)
 {
     Sim::$pushes[] = "$title: $text";

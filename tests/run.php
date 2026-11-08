@@ -687,7 +687,7 @@ $m->ApplyChanges();
 armAway();
 check('Scharf: kein Blinken', $m->timers['BlinkTimer'] === 0);
 Sim::update(DOOR, true);
-check('Voralarm: Lampe an, Blinktimer 500 ms', Sim::$vars[1501]['value'] === true && $m->timers['BlinkTimer'] === 500);
+check('Voralarm: Lampe an, Blinktimer 1000 ms (0,5 Hz)', Sim::$vars[1501]['value'] === true && $m->timers['BlinkTimer'] === 1000);
 $m->RequestAction('BlinkElapsed', 0);
 $off = Sim::$vars[1501]['value'];
 $m->RequestAction('BlinkElapsed', 0);
@@ -792,6 +792,7 @@ check('Takt aus', Sim::$vars[2011]['value'] === false && Sim::$vars[2021]['value
 Sim::$vars[2012]['value'] = 0;
 $m->RequestAction('SignalElapsed', 0);
 check('Takt wieder rot', Sim::$vars[2012]['value'] === 0xFF0000);
+check('Ein Hue-Befehl je Lampe: an, rot, 100 %, ohne Überblendung', in_array(['hue', 2001, 0xFF0000, ['on' => ['on' => true], 'dynamics' => ['duration' => 0], 'dimming' => ['brightness' => 100]]], Sim::$actions, true));
 Sim::fireTimer();
 check('Sirene läuft: blinkt weiter', state($m) === 3 && $m->timers['SignalTimer'] === 1000);
 Sim::update(THILO, true);

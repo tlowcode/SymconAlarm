@@ -363,7 +363,21 @@
                 {
                     "type": "CheckBox",
                     "name": "PreAlarmBlink",
-                    "caption": "Voralarm-Lampen blinken mit 1 Hz, solange der Voralarm läuft"
+                    "caption": "Voralarm-Lampen blinken, solange der Voralarm läuft"
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "PreAlarmBlinkInterval",
+                    "caption": "Blinktakt je Phase an/aus (1000 ms = 0,5 Hz)",
+                    "suffix": "ms",
+                    "minimum": 250
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "PreAlarmBlinkInterval",
+                    "caption": "Blinktakt je Phase an/aus (1000 ms = 0,5 Hz)",
+                    "suffix": "ms",
+                    "minimum": 250
                 },
                 {
                     "type": "List",

@@ -107,6 +107,7 @@ class Alarmanlage extends IPSModule
         $this->RegisterPropertyString('AlarmLights', '[]');
         $this->RegisterPropertyString('PreAlarmLights', '[]');
         $this->RegisterPropertyBoolean('PreAlarmBlink', true);
+        $this->RegisterPropertyInteger('PreAlarmBlinkInterval', 1000);
         $this->RegisterPropertyString('Shutters', '[]');
 
         $this->RegisterPropertyInteger('EntryDelay', 30);
@@ -1433,11 +1434,8 @@ class Alarmanlage extends IPSModule
                 ];
             }
             $this->WriteAttributeString('SignalSaved', json_encode($saved));
-            foreach ($lights as $vars) {
-                $this->act($vars['color'], $this->ReadPropertyInteger('SignalColor'));
-                if ($vars['brightness'] > 0) {
-                    $this->act($vars['brightness'], 100);
-                }
+            foreach (array_keys($lights) as $instanceID) {
+                $this->hueColor($instanceID, $lights[$instanceID], $this->ReadPropertyInteger('SignalColor'), 100);
             }
             $this->WriteAttributeBoolean('SignalOn', true);
             $this->SetTimerInterval('SignalTimer', max(500, $this->ReadPropertyInteger('SignalInterval')));
@@ -1455,10 +1453,9 @@ class Alarmanlage extends IPSModule
         }
         $on = !$this->ReadAttributeBoolean('SignalOn');
         $this->WriteAttributeBoolean('SignalOn', $on);
-        foreach ($this->signalLights() as $vars) {
-            // "color" schaltet die Lampe zugleich ein, so reicht ein Befehl je Takt
+        foreach ($this->signalLights() as $instanceID => $vars) {
             if ($on) {
-                $this->act($vars['color'], $this->ReadPropertyInteger('SignalColor'));
+                $this->hueColor($instanceID, $vars, $this->ReadPropertyInteger('SignalColor'), 100);
             } else {
                 $this->act($vars['on'], false);
             }
@@ -1476,11 +1473,34 @@ class Alarmanlage extends IPSModule
                 continue;
             }
             // Hue übernimmt Farbe und Helligkeit nur im eingeschalteten Zustand, daher erst setzen, dann ggf. aus
-            $this->act($vars['color'], $before['color']);
-            if ($vars['brightness'] > 0 && $before['brightness'] > 0) {
-                $this->act($vars['brightness'], $before['brightness']);
+            $this->hueColor($instanceID, $vars, $before['color'], $before['brightness']);
+            if (!$before['on']) {
+                $this->act($vars['on'], false);
             }
-            $this->act($vars['on'], $before['on']);
+        }
+    }
+
+    /**
+     * Schaltet eine Hue-Lampe/-Gruppe ein, mit Farbe und Helligkeit in einem Befehl ohne Überblendung.
+     * PHUE_setColor statt RequestAction auf "color", weil Letzteres im Hue-V2-Modul je nach Version fehlschlägt.
+     */
+    private function hueColor(int $instanceID, array $vars, int $color, int $brightness): void
+    {
+        $params = ['on' => ['on' => true], 'dynamics' => ['duration' => 0]];
+        if ($brightness > 0) {
+            $params['dimming'] = ['brightness' => min(100, $brightness)];
+        }
+        if (function_exists('PHUE_setColor')) {
+            try {
+                PHUE_setColor($instanceID, $color, $params);
+                return;
+            } catch (Throwable $e) {
+                $this->log("Hue $instanceID (" . IPS_GetName($instanceID) . '): ' . $e->getMessage());
+            }
+        }
+        $this->act($vars['color'], $color);
+        if ($vars['brightness'] > 0 && $brightness > 0) {
+            $this->act($vars['brightness'], $brightness);
         }
     }
 
@@ -1680,7 +1700,7 @@ class Alarmanlage extends IPSModule
             && $this->listProperty('PreAlarmLights');
         if ($wanted && !$blinking) {
             $this->WriteAttributeBoolean('BlinkOn', true);
-            $this->SetTimerInterval('BlinkTimer', 500);
+            $this->SetTimerInterval('BlinkTimer', max(250, $this->ReadPropertyInteger('PreAlarmBlinkInterval')));
         } elseif (!$wanted && $blinking) {
             $this->SetTimerInterval('BlinkTimer', 0);
             // Nach dem Voralarm bleiben die Lampen als Orientierungslicht an
