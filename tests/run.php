@@ -821,6 +821,21 @@ $m->properties['SignalLights'] = json_encode([['InstanceID' => 4711]]);
 $m->ApplyChanges();
 check('Fehlende Hue-Instanz: Status 201', $m->status === 201);
 
+echo "Hue-Gruppe ohne gemeldete Farbe\n";
+$m = setup();
+Sim::addHueLight(2101, 2111, 2112, 2113, true, 0, 60, 2114, 300);
+Sim::addHueLight(2102, 2121, 2122, 2123, false, 0, 60, 2124, 0);
+$m->properties['SignalLights'] = json_encode([['InstanceID' => 2101], ['InstanceID' => 2102]]);
+$m->properties['PerimeterHooks'] = json_encode([['Key' => 'cam', 'Name' => 'Kamera', 'Modes' => 0, 'DarkOnly' => false, 'Push' => false, 'Signal' => true]]);
+$m->ApplyChanges();
+hook($m, '/hook/alarm/cam');
+$m->attributes['SignalUntil'] = time() - 1;
+$m->log = [];
+$m->RequestAction('SignalElapsed', 0);
+check('Kein Fehler beim Wiederherstellen', !preg_grep('/Division|fehlgeschlagen/', $m->log));
+check('Gruppe war an: Farbtemperatur 300 und 60 %, an', Sim::$vars[2114]['value'] === 300 && Sim::$vars[2113]['value'] === 60 && Sim::$vars[2111]['value'] === true);
+check('Gruppe war aus: Warmweiß, dann aus', Sim::$vars[2124]['value'] === 370 && Sim::$vars[2121]['value'] === false);
+
 echo "Bewegungslicht\n";
 function lightSetup(bool $day, int $ambient = 10): Alarmanlage
 {

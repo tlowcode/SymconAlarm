@@ -41,6 +41,8 @@ class Alarmanlage extends IPSModule
     /** Kategorien der DPT16-Textausgabe, Property heißt jeweils "Text" + Schlüssel */
     private const TEXT_CATEGORIES = ['Armed', 'Disarmed', 'Excluded', 'PreAlarm', 'Alarm', 'SirenOff', 'EkeyRejected', 'Reminder', 'Perimeter'];
     private const WEBHOOK_CONTROL = '{015A6EB8-D6E5-4B93-B496-0D3F77AE9FE1}';
+    /** Warmweiß (2700 K) für Hue-Lampen, deren vorherige Farbe unbekannt ist */
+    private const HUE_WARM_WHITE_MIREK = 370;
     private const PERIMETER_MODES = ['immer', 'nur scharf', 'nur Abwesend', 'nur Nacht', 'nie'];
 
     private const STATUS_OK = 102;
@@ -1499,7 +1501,7 @@ class Alarmanlage extends IPSModule
 
     // ---------- Signallampen (z. B. Hue im Garten) ----------
 
-    /** @return array{on: int, color: int, brightness: int}|null Variablen einer Lampen-/Gruppeninstanz (Philips HUE V2) */
+    /** @return array{on: int, color: int, brightness: int, ct: int}|null Variablen einer Lampen-/Gruppeninstanz (Philips HUE V2) */
     private function hueVariables(int $instanceID): ?array
     {
         $on = @IPS_GetObjectIDByIdent('on', $instanceID);
@@ -1507,10 +1509,15 @@ class Alarmanlage extends IPSModule
         if (!$on || !$color) {
             return null;
         }
-        return ['on' => $on, 'color' => $color, 'brightness' => (int) @IPS_GetObjectIDByIdent('brightness', $instanceID)];
+        return [
+            'on'         => $on,
+            'color'      => $color,
+            'brightness' => (int) @IPS_GetObjectIDByIdent('brightness', $instanceID),
+            'ct'         => (int) @IPS_GetObjectIDByIdent('color_temperature', $instanceID),
+        ];
     }
 
-    /** @return array<int, array{on: int, color: int, brightness: int}> */
+    /** @return array<int, array{on: int, color: int, brightness: int, ct: int}> */
     private function signalLights(): array
     {
         $lights = [];
@@ -1545,6 +1552,7 @@ class Alarmanlage extends IPSModule
                     'on'         => (bool) GetValue($vars['on']),
                     'color'      => (int) GetValue($vars['color']),
                     'brightness' => $vars['brightness'] > 0 ? (int) GetValue($vars['brightness']) : 0,
+                    'ct'         => $vars['ct'] > 0 ? (int) GetValue($vars['ct']) : 0,
                 ];
             }
             $this->WriteAttributeString('SignalSaved', json_encode($saved));
@@ -1591,20 +1599,29 @@ class Alarmanlage extends IPSModule
                 $this->act($vars['on'], false);
                 continue;
             }
-            // Hue übernimmt Farbe und Helligkeit nur im eingeschalteten Zustand, daher erst setzen, dann ggf. aus
-            $this->hueColor($instanceID, $vars, $before['color'], $before['brightness']);
+            // Hue übernimmt Farbe und Helligkeit nur im eingeschalteten Zustand, daher erst setzen, dann ggf. aus.
+            // Gruppen melden ihre Farbe meist nicht (Variable 0 = schwarz): dann zurück auf Weiß statt Rot.
+            if ($before['color'] > 0) {
+                $this->hueColor($instanceID, $vars, $before['color'], $before['brightness']);
+            } elseif ($vars['ct'] > 0) {
+                $this->act($vars['ct'], ($before['ct'] ?? 0) >= 153 ? $before['ct'] : self::HUE_WARM_WHITE_MIREK);
+                if ($vars['brightness'] > 0 && $before['brightness'] > 0) {
+                    $this->act($vars['brightness'], $before['brightness']);
+                }
+            }
             if (!$before['on']) {
                 $this->act($vars['on'], false);
             }
         }
     }
 
-    /**
-     * Schaltet eine Hue-Lampe/-Gruppe ein, mit Farbe und Helligkeit in einem Befehl ohne Überblendung.
-     * PHUE_setColor statt RequestAction auf "color", weil Letzteres im Hue-V2-Modul je nach Version fehlschlägt.
-     */
+    /** Schaltet eine Hue-Lampe/-Gruppe ein, mit Farbe und Helligkeit in einem Befehl ohne Überblendung. */
     private function hueColor(int $instanceID, array $vars, int $color, int $brightness): void
     {
+        // Schwarz (0) lässt die Farbumrechnung im Hue-Modul durch null teilen
+        if ($color <= 0) {
+            return;
+        }
         $params = ['on' => ['on' => true], 'dynamics' => ['duration' => 0]];
         if ($brightness > 0) {
             $params['dimming'] = ['brightness' => min(100, $brightness)];

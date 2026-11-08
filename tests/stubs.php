@@ -30,9 +30,13 @@ class Sim
         self::$vars[$id] = ['name' => $name, 'type' => $type, 'value' => $value, 'profile' => $profile, 'updated' => 0];
     }
 
-    public static function addHueLight(int $instanceID, int $onID, int $colorID, int $brightnessID, bool $on = false, int $color = 0xFFFFFF, int $brightness = 50): void
+    public static function addHueLight(int $instanceID, int $onID, int $colorID, int $brightnessID, bool $on = false, int $color = 0xFFFFFF, int $brightness = 50, int $ctID = 0, int $ct = 0): void
     {
         self::$instances[$instanceID] = ['on' => $onID, 'color' => $colorID, 'brightness' => $brightnessID];
+        if ($ctID > 0) {
+            self::$instances[$instanceID]['color_temperature'] = $ctID;
+            self::addVar($ctID, 'Farbtemperatur', VARIABLETYPE_INTEGER, $ct);
+        }
         self::addVar($onID, 'Status', VARIABLETYPE_BOOLEAN, $on);
         self::addVar($colorID, 'Farbe', VARIABLETYPE_INTEGER, $color);
         self::addVar($brightnessID, 'Helligkeit', VARIABLETYPE_INTEGER, $brightness);
@@ -197,6 +201,9 @@ function IPS_RunScriptEx($id, $params)
 }
 function PHUE_setColor($instanceID, $color, $params)
 {
+    if ($color === 0) {
+        throw new DivisionByZeroError('Division by zero');
+    }
     $vars = Sim::$instances[$instanceID];
     Sim::$vars[$vars['on']]['value'] = $params['on']['on'];
     Sim::$vars[$vars['color']]['value'] = $color;
