@@ -361,6 +361,11 @@
                     ]
                 },
                 {
+                    "type": "CheckBox",
+                    "name": "PreAlarmBlink",
+                    "caption": "Voralarm-Lampen blinken mit 1 Hz, solange der Voralarm läuft"
+                },
+                {
                     "type": "List",
                     "name": "Shutters",
                     "caption": "Rollläden / Jalousien bei Alarm öffnen",

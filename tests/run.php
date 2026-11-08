@@ -677,5 +677,41 @@ $m->RequestAction('SimElapsed', 0);
 Sim::update(THILO, true);
 check('Heimkommen: Simulation stoppt, Licht bleibt an', $m->timers['SimTimer'] === 0 && Sim::$vars[1401]['value'] === true);
 
+echo "Voralarm-Lampen blinken\n";
+$m = setup();
+Sim::addVar(1501, 'Flurlicht', VARIABLETYPE_BOOLEAN, false);
+$m->properties['PreAlarmLights'] = json_encode([['SwitchVariableID' => 1501, 'BrightnessVariableID' => 0]]);
+$m->ApplyChanges();
+armAway();
+check('Scharf: kein Blinken', $m->timers['BlinkTimer'] === 0);
+Sim::update(DOOR, true);
+check('Voralarm: Lampe an, Blinktimer 500 ms', Sim::$vars[1501]['value'] === true && $m->timers['BlinkTimer'] === 500);
+$m->RequestAction('BlinkElapsed', 0);
+$off = Sim::$vars[1501]['value'];
+$m->RequestAction('BlinkElapsed', 0);
+check('Takt: aus, dann wieder an', $off === false && Sim::$vars[1501]['value'] === true);
+$m->RequestAction('BlinkElapsed', 0);
+Sim::update(THILO, true);
+check('Unscharf: Blinken endet, Lampe bleibt an', $m->timers['BlinkTimer'] === 0 && Sim::$vars[1501]['value'] === true);
+
+$m = setup();
+Sim::addVar(1501, 'Flurlicht', VARIABLETYPE_BOOLEAN, false);
+$m->properties['PreAlarmLights'] = json_encode([['SwitchVariableID' => 1501, 'BrightnessVariableID' => 0]]);
+$m->ApplyChanges();
+armAway();
+Sim::update(DOOR, true);
+$m->RequestAction('BlinkElapsed', 0);
+Sim::fireTimer();
+check('Alarm: Blinken endet, Lampe an', state($m) === 2 && $m->timers['BlinkTimer'] === 0 && Sim::$vars[1501]['value'] === true);
+
+$m = setup();
+Sim::addVar(1501, 'Flurlicht', VARIABLETYPE_BOOLEAN, false);
+$m->properties['PreAlarmLights'] = json_encode([['SwitchVariableID' => 1501, 'BrightnessVariableID' => 0]]);
+$m->properties['PreAlarmBlink'] = false;
+$m->ApplyChanges();
+armAway();
+Sim::update(DOOR, true);
+check('Blinken abgeschaltet: Lampe dauerhaft an', $m->timers['BlinkTimer'] === 0 && Sim::$vars[1501]['value'] === true);
+
 echo $failures === 0 ? "\nAlle Tests bestanden.\n" : "\n$failures Test(s) fehlgeschlagen.\n";
 exit($failures === 0 ? 0 : 1);

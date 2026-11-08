@@ -90,6 +90,7 @@ class Alarmanlage extends IPSModule
         $this->RegisterPropertyString('Sirens', '[]');
         $this->RegisterPropertyString('AlarmLights', '[]');
         $this->RegisterPropertyString('PreAlarmLights', '[]');
+        $this->RegisterPropertyBoolean('PreAlarmBlink', true);
         $this->RegisterPropertyString('Shutters', '[]');
 
         $this->RegisterPropertyInteger('EntryDelay', 30);
@@ -133,6 +134,7 @@ class Alarmanlage extends IPSModule
         $this->RegisterAttributeString('HomeKitWrites', '[]');
         $this->RegisterAttributeString('TestLog', '{}');
         $this->RegisterAttributeBoolean('PreAlarmEntry', false);
+        $this->RegisterAttributeBoolean('BlinkOn', false);
         $this->RegisterAttributeInteger('ReminderCount', 0);
         $this->RegisterAttributeString('SimState', '{}');
 
@@ -140,6 +142,7 @@ class Alarmanlage extends IPSModule
         $this->RegisterTimer('TextTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'TextTimerElapsed\', 0);');
         $this->RegisterTimer('CountdownTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'CountdownElapsed\', 0);');
         $this->RegisterTimer('ReminderTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'ReminderElapsed\', 0);');
+        $this->RegisterTimer('BlinkTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'BlinkElapsed\', 0);');
         $this->RegisterTimer('SimTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'SimElapsed\', 0);');
 
         $this->ensureProfiles();
@@ -286,6 +289,12 @@ class Alarmanlage extends IPSModule
             case 'ReminderElapsed':
                 $this->lock(function () {
                     $this->onReminder();
+                });
+                break;
+
+            case 'BlinkElapsed':
+                $this->lock(function () {
+                    $this->blink();
                 });
                 break;
 
@@ -1353,6 +1362,41 @@ class Alarmanlage extends IPSModule
         }
     }
 
+    /** Lässt die Voralarm-Lampen blinken, solange der Voralarm läuft. */
+    private function updateBlink(): void
+    {
+        $blinking = $this->GetTimerInterval('BlinkTimer') > 0;
+        $wanted = $this->state() === self::STATE_PREALARM && $this->ReadPropertyBoolean('PreAlarmBlink')
+            && $this->listProperty('PreAlarmLights');
+        if ($wanted && !$blinking) {
+            $this->WriteAttributeBoolean('BlinkOn', true);
+            $this->SetTimerInterval('BlinkTimer', 500);
+        } elseif (!$wanted && $blinking) {
+            $this->SetTimerInterval('BlinkTimer', 0);
+            // Nach dem Voralarm bleiben die Lampen als Orientierungslicht an
+            if (!$this->ReadAttributeBoolean('BlinkOn')) {
+                $this->switchBlinkLights(true);
+            }
+        }
+    }
+
+    private function blink(): void
+    {
+        if ($this->state() !== self::STATE_PREALARM) {
+            return;
+        }
+        $on = !$this->ReadAttributeBoolean('BlinkOn');
+        $this->WriteAttributeBoolean('BlinkOn', $on);
+        $this->switchBlinkLights($on);
+    }
+
+    private function switchBlinkLights(bool $on): void
+    {
+        foreach ($this->listProperty('PreAlarmLights') as $row) {
+            $this->act((int) $row['SwitchVariableID'], $on);
+        }
+    }
+
     private function switchLights(string $property): void
     {
         foreach ($this->listProperty($property) as $row) {
@@ -1672,6 +1716,7 @@ class Alarmanlage extends IPSModule
         }
         try {
             $fn();
+            $this->updateBlink();
             $this->syncStatusVariables();
         } finally {
             IPS_SemaphoreLeave($key);
