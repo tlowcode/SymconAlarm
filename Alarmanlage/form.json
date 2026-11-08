@@ -400,7 +400,7 @@
                 {
                     "type": "NumberSpinner",
                     "name": "NightArmDelay",
-                    "caption": "Ausgangsverzögerung \"Nacht\" (Scharf Request bis scharf, 0 = sofort)",
+                    "caption": "Ausgangsverzögerung (Nacht über Request/HomeKit, Abwesend über HomeKit; 0 = sofort)",
                     "suffix": " s",
                     "minimum": 0
                 },
