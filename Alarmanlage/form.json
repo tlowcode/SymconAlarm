@@ -411,7 +411,7 @@
         },
         {
             "type": "ExpansionPanel",
-            "caption": "Perimeter-Warnung (WebHooks, z. B. Außenkameras)",
+            "caption": "WebHooks: Perimeter-Warnung und Bewegungslicht (z. B. Außenkameras)",
             "items": [
                 {
                     "type": "ValidationTextBox",
@@ -425,7 +425,7 @@
                 },
                 {
                     "type": "Label",
-                    "caption": "Aufruf: http://<Symcon-IP>:3777{HOOK}?trigger=<Schlüssel> oder http://<Symcon-IP>:3777{HOOK}/<Schlüssel>. Ein Aufruf mit &state=0 (Ende der Bewegung) wird ignoriert."
+                    "caption": "Aufruf: http://<Symcon-IP>:3777{HOOK}?trigger=<Schlüssel> oder http://<Symcon-IP>:3777{HOOK}/<Schlüssel>. Ein Aufruf mit &state=0 oder &motion=0 (Ende der Bewegung) wird ignoriert."
                 },
                 {
                     "type": "List",
@@ -454,7 +454,7 @@
                             }
                         },
                         {
-                            "caption": "Aktiv",
+                            "caption": "Warnung",
                             "name": "Modes",
                             "width": "150px",
                             "add": 0,
@@ -476,6 +476,10 @@
                                     {
                                         "caption": "nur Nacht",
                                         "value": 3
+                                    },
+                                    {
+                                        "caption": "nie (nur Licht)",
+                                        "value": 4
                                     }
                                 ]
                             }
@@ -506,6 +510,15 @@
                             "edit": {
                                 "type": "CheckBox"
                             }
+                        },
+                        {
+                            "caption": "Bewegungslicht",
+                            "name": "Light",
+                            "width": "140px",
+                            "add": false,
+                            "edit": {
+                                "type": "CheckBox"
+                            }
                         }
                     ]
                 },
@@ -531,6 +544,69 @@
                 {
                     "type": "Label",
                     "caption": "Perimeter-Meldungen lösen keinen Alarm aus. Sie melden per Push, DPT16-Hinweis und Signallampen."
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "Bewegungslicht (z. B. Garten)",
+            "items": [
+                {
+                    "type": "Label",
+                    "caption": "Auslöser sind die WebHooks mit Häkchen \"Bewegungslicht\". Nachts Grundhelligkeit, bei Bewegung heller für die eingestellte Zeit (jede Bewegung verlängert), tagsüber aus."
+                },
+                {
+                    "type": "SelectVariable",
+                    "name": "LightSwitchVariableID",
+                    "caption": "Ein/Aus (z. B. HUE Grouped Light: Status)"
+                },
+                {
+                    "type": "SelectVariable",
+                    "name": "LightBrightnessVariableID",
+                    "caption": "Helligkeit (z. B. HUE Grouped Light: Helligkeit)"
+                },
+                {
+                    "type": "SelectVariable",
+                    "name": "LightDayVariableID",
+                    "caption": "Tag-Variable (true = Tag; leer = die der Perimeter-Warnung bzw. Simulation)"
+                },
+                {
+                    "type": "SelectVariable",
+                    "name": "LightAmbientVariableID",
+                    "caption": "Umgebungshelligkeit (optional)"
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "LightAmbientThreshold",
+                    "caption": "Tagsüber Bewegungslicht nur unter (0 = tagsüber nie)",
+                    "minimum": 0
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "LightBasePercent",
+                    "caption": "Grundhelligkeit nachts (0 = aus)",
+                    "suffix": "%",
+                    "minimum": 0,
+                    "maximum": 100
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "LightMotionPercent",
+                    "caption": "Helligkeit bei Bewegung",
+                    "suffix": "%",
+                    "minimum": 1,
+                    "maximum": 100
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "LightMotionSeconds",
+                    "caption": "Dauer nach Bewegung",
+                    "suffix": "s",
+                    "minimum": 10
+                },
+                {
+                    "type": "Label",
+                    "caption": "Ist die Lampe auch Signallampe, hat das rote Blinken Vorrang; danach stellt sich das Bewegungslicht passend ein."
                 }
             ]
         },

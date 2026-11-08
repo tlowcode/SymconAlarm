@@ -36,6 +36,7 @@ class Sim
         self::addVar($onID, 'Status', VARIABLETYPE_BOOLEAN, $on);
         self::addVar($colorID, 'Farbe', VARIABLETYPE_INTEGER, $color);
         self::addVar($brightnessID, 'Helligkeit', VARIABLETYPE_INTEGER, $brightness);
+        self::$vars[$brightnessID]['ident'] = 'brightness';
     }
 
     public static function reset(): void
@@ -150,6 +151,7 @@ function IPS_GetKernelRunlevel() { return KR_READY; }
 function IPS_VariableExists($id) { return isset(Sim::$vars[$id]); }
 function IPS_ObjectExists($id) { return isset(Sim::$vars[$id]); }
 function IPS_InstanceExists($id) { return $id === 77777 || isset(Sim::$instances[$id]); }
+function IPS_GetObject($id) { return ['ObjectIdent' => Sim::$vars[$id]['ident'] ?? '']; }
 function IPS_GetObjectIDByIdent($ident, $parentID) { return Sim::$instances[$parentID][$ident] ?? false; }
 function IPS_GetInstanceListByModuleID($moduleID) { return isset(Sim::$config[55555]) ? [55555] : []; }
 function IPS_GetProperty($id, $name) { return Sim::$config[$id][$name]; }

@@ -41,7 +41,7 @@ class Alarmanlage extends IPSModule
     /** Kategorien der DPT16-Textausgabe, Property heißt jeweils "Text" + Schlüssel */
     private const TEXT_CATEGORIES = ['Armed', 'Disarmed', 'Excluded', 'PreAlarm', 'Alarm', 'SirenOff', 'EkeyRejected', 'Reminder', 'Perimeter'];
     private const WEBHOOK_CONTROL = '{015A6EB8-D6E5-4B93-B496-0D3F77AE9FE1}';
-    private const PERIMETER_MODES = ['immer', 'nur scharf', 'nur Abwesend', 'nur Nacht'];
+    private const PERIMETER_MODES = ['immer', 'nur scharf', 'nur Abwesend', 'nur Nacht', 'nie'];
 
     private const STATUS_OK = 102;
     private const STATUS_NO_CONTACTS = 104;
@@ -95,6 +95,15 @@ class Alarmanlage extends IPSModule
         $this->RegisterPropertyInteger('PerimeterCooldown', 60);
         $this->RegisterPropertyInteger('PerimeterDayVariableID', 0);
         $this->RegisterPropertyInteger('PerimeterSignalSeconds', 30);
+
+        $this->RegisterPropertyInteger('LightSwitchVariableID', 0);
+        $this->RegisterPropertyInteger('LightBrightnessVariableID', 0);
+        $this->RegisterPropertyInteger('LightDayVariableID', 0);
+        $this->RegisterPropertyInteger('LightAmbientVariableID', 0);
+        $this->RegisterPropertyInteger('LightAmbientThreshold', 30);
+        $this->RegisterPropertyInteger('LightBasePercent', 50);
+        $this->RegisterPropertyInteger('LightMotionPercent', 100);
+        $this->RegisterPropertyInteger('LightMotionSeconds', 600);
 
         $this->RegisterPropertyString('SignalLights', '[]');
         $this->RegisterPropertyInteger('SignalColor', 0xFF0000);
@@ -156,6 +165,7 @@ class Alarmanlage extends IPSModule
         $this->RegisterAttributeInteger('SignalUntil', 0);
         $this->RegisterAttributeBoolean('SignalOn', false);
         $this->RegisterAttributeString('SignalSaved', '{}');
+        $this->RegisterAttributeInteger('LightDeferred', -1);
         $this->RegisterAttributeInteger('ReminderCount', 0);
         $this->RegisterAttributeString('SimState', '{}');
 
@@ -164,6 +174,7 @@ class Alarmanlage extends IPSModule
         $this->RegisterTimer('CountdownTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'CountdownElapsed\', 0);');
         $this->RegisterTimer('ReminderTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'ReminderElapsed\', 0);');
         $this->RegisterTimer('BlinkTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'BlinkElapsed\', 0);');
+        $this->RegisterTimer('LightTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'LightElapsed\', 0);');
         $this->RegisterTimer('SignalTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'SignalElapsed\', 0);');
         $this->RegisterTimer('SimTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'SimElapsed\', 0);');
 
@@ -206,7 +217,8 @@ class Alarmanlage extends IPSModule
             [$this->ReadPropertyInteger('ArmRequestVariableID')],
             $this->ekeyIDs(),
             [$this->externalHomeKitID()],
-            array_keys($this->namedList('PanicInputs'))
+            array_keys($this->namedList('PanicInputs')),
+            [$this->lightConfigured() ? $this->lightDayID() : 0]
         );
         foreach ($watch as $id) {
             if ($id <= 0) {
@@ -336,6 +348,14 @@ class Alarmanlage extends IPSModule
             case 'BlinkElapsed':
                 $this->lock(function () {
                     $this->blink();
+                });
+                break;
+
+            case 'LightElapsed':
+                $this->lock(function () {
+                    $this->SetTimerInterval('LightTimer', 0);
+                    $this->SendDebug('Bewegungslicht', 'Bewegungszeit abgelaufen.', 0);
+                    $this->setLightPercent($this->lightRestPercent());
                 });
                 break;
 
@@ -485,6 +505,12 @@ class Alarmanlage extends IPSModule
 
     private function dispatchVariable(int $id, $value, bool $changed): void
     {
+        if ($id === $this->lightDayID() && $this->lightConfigured()) {
+            if ($changed) {
+                $this->onLightDayChange();
+            }
+            return;
+        }
         if ($id === $this->externalHomeKitID()) {
             if (!$changed) {
                 return;
@@ -1306,7 +1332,7 @@ class Alarmanlage extends IPSModule
             return;
         }
 
-        $state = strtolower((string) ($_GET['state'] ?? '1'));
+        $state = strtolower((string) ($_GET['state'] ?? $_GET['motion'] ?? '1'));
         if (!in_array($state, ['0', 'false', 'off', 'end', 'stop'], true)) {
             $this->lock(function () use ($row) {
                 $this->onPerimeterHook($row);
@@ -1320,7 +1346,11 @@ class Alarmanlage extends IPSModule
         $test = $this->ReadPropertyBoolean('TestMode');
         $before = $test ? $this->testBefore() : [];
         $this->testNote = '';
+        $light = ($row['Light'] ?? false) ? $this->onLightMotion() : '';
         $this->onPerimeter($row);
+        if ($light !== '') {
+            $this->testNote .= ($this->testNote !== '' ? ', ' : '') . "Licht: $light";
+        }
         if ($test) {
             $key = trim((string) $row['Key']);
             $this->writeTestEvent('hook:' . $key, ['Perimeter', $this->perimeterName($row), $this->testNote, false], $before);
@@ -1342,9 +1372,10 @@ class Alarmanlage extends IPSModule
             1 => $mode !== self::MODE_OFF,
             2 => $mode === self::MODE_AWAY,
             3 => $mode === self::MODE_NIGHT,
+            4 => false,
         ][(int) ($row['Modes'] ?? 0)] ?? true;
         if (!$active) {
-            $this->testNote = 'ignoriert (' . self::PERIMETER_MODES[(int) $row['Modes']] . ')';
+            $this->testNote = 'Warnung ' . self::PERIMETER_MODES[(int) $row['Modes']];
             $this->SendDebug('Perimeter', "$name ignoriert: Modus " . self::MODE_LABELS[$mode], 0);
             return;
         }
@@ -1381,6 +1412,89 @@ class Alarmanlage extends IPSModule
     {
         $id = $this->ReadPropertyInteger('PerimeterDayVariableID') ?: $this->ReadPropertyInteger('SimDayVariableID');
         return $id > 0 && IPS_VariableExists($id) && (bool) GetValue($id);
+    }
+
+    // ---------- Bewegungslicht (z. B. Garten) ----------
+
+    private function lightConfigured(): bool
+    {
+        return $this->ReadPropertyInteger('LightSwitchVariableID') > 0;
+    }
+
+    private function lightDayID(): int
+    {
+        return $this->ReadPropertyInteger('LightDayVariableID')
+            ?: $this->ReadPropertyInteger('PerimeterDayVariableID')
+            ?: $this->ReadPropertyInteger('SimDayVariableID');
+    }
+
+    private function isLightDay(): bool
+    {
+        $id = $this->lightDayID();
+        return $id > 0 && IPS_VariableExists($id) && (bool) GetValue($id);
+    }
+
+    /** Ruhezustand: nachts Grundhelligkeit, tagsüber aus. */
+    private function lightRestPercent(): int
+    {
+        return $this->isLightDay() ? 0 : $this->ReadPropertyInteger('LightBasePercent');
+    }
+
+    /** @return string Ergebnis für das Testprotokoll */
+    private function onLightMotion(): string
+    {
+        if (!$this->lightConfigured()) {
+            return '';
+        }
+        $ambientID = $this->ReadPropertyInteger('LightAmbientVariableID');
+        $threshold = $this->ReadPropertyInteger('LightAmbientThreshold');
+        if ($this->isLightDay() && $ambientID > 0 && $threshold > 0 && IPS_VariableExists($ambientID) && GetValue($ambientID) >= $threshold) {
+            $this->SendDebug('Bewegungslicht', 'Bewegung am Tag, aber hell genug.', 0);
+            return 'zu hell';
+        }
+        $percent = $this->ReadPropertyInteger('LightMotionPercent');
+        $seconds = $this->ReadPropertyInteger('LightMotionSeconds');
+        $this->SendDebug('Bewegungslicht', "Bewegung: $percent % für $seconds s.", 0);
+        $this->setLightPercent($percent);
+        // Jede Bewegung verlängert die Zeit
+        $this->SetTimerInterval('LightTimer', 0);
+        $this->SetTimerInterval('LightTimer', $seconds * 1000);
+        return "$percent %";
+    }
+
+    private function onLightDayChange(): void
+    {
+        if ($this->GetTimerInterval('LightTimer') > 0) {
+            $this->SendDebug('Bewegungslicht', 'Tag/Nacht-Wechsel, Bewegungszeit läuft noch.', 0);
+            return;
+        }
+        $this->setLightPercent($this->lightRestPercent());
+    }
+
+    private function setLightPercent(int $percent): void
+    {
+        $switchID = $this->ReadPropertyInteger('LightSwitchVariableID');
+        // Blinkt die Lampe gerade als Signallampe, wird der Zustand erst nach dem Signal gesetzt
+        if ($this->GetTimerInterval('SignalTimer') > 0 && in_array($switchID, array_column($this->signalLights(), 'on'), true)) {
+            $this->WriteAttributeInteger('LightDeferred', $percent);
+            return;
+        }
+        if (!IPS_VariableExists($switchID)) {
+            return;
+        }
+        if ($percent <= 0) {
+            if (GetValue($switchID)) {
+                $this->act($switchID, false);
+            }
+            return;
+        }
+        if (!GetValue($switchID)) {
+            $this->act($switchID, true);
+        }
+        $brightnessID = $this->ReadPropertyInteger('LightBrightnessVariableID');
+        if ($brightnessID > 0 && IPS_VariableExists($brightnessID)) {
+            $this->act($brightnessID, (int) round($this->maxValue($brightnessID) * $percent / 100));
+        }
     }
 
     // ---------- Signallampen (z. B. Hue im Garten) ----------
@@ -1443,6 +1557,11 @@ class Alarmanlage extends IPSModule
             $this->SetTimerInterval('SignalTimer', 0);
             $this->WriteAttributeInteger('SignalUntil', 0);
             $this->restoreSignalLights($lights);
+            $deferred = $this->ReadAttributeInteger('LightDeferred');
+            if ($deferred >= 0) {
+                $this->WriteAttributeInteger('LightDeferred', -1);
+                $this->setLightPercent($deferred);
+            }
         }
     }
 
@@ -1782,7 +1901,8 @@ class Alarmanlage extends IPSModule
         if ($profile !== '' && IPS_VariableProfileExists($profile)) {
             return IPS_GetVariableProfile($profile)['MaxValue'];
         }
-        return 254;
+        // Philips HUE V2 ab 2.1 nutzt Darstellungen statt Profilen, Helligkeit 0 bis 100
+        return IPS_GetObject($id)['ObjectIdent'] === 'brightness' ? 100 : 254;
     }
 
     // ---------- Hilfsfunktionen ----------
@@ -1959,6 +2079,9 @@ class Alarmanlage extends IPSModule
             }
         }
         $ids[] = $this->ReadPropertyInteger('SimDayVariableID');
+        foreach (['LightSwitchVariableID', 'LightBrightnessVariableID', 'LightDayVariableID', 'LightAmbientVariableID', 'PerimeterDayVariableID'] as $property) {
+            $ids[] = $this->ReadPropertyInteger($property);
+        }
         foreach (['Shutters', 'TextOutputs', 'CountdownOutputs', 'ArmedOutputs', 'SilentAlarmOutputs', 'SimLights'] as $property) {
             foreach ($this->listProperty($property) as $row) {
                 $ids[] = (int) $row['VariableID'];

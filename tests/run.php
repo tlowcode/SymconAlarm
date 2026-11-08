@@ -821,5 +821,63 @@ $m->properties['SignalLights'] = json_encode([['InstanceID' => 4711]]);
 $m->ApplyChanges();
 check('Fehlende Hue-Instanz: Status 201', $m->status === 201);
 
+echo "Bewegungslicht\n";
+function lightSetup(bool $day, int $ambient = 10): Alarmanlage
+{
+    $m = setup();
+    Sim::addHueLight(3001, 3011, 3012, 3013, false, 0xFFFFFF, 0);
+    Sim::addVar(3020, 'Es ist Tag', VARIABLETYPE_BOOLEAN, $day);
+    Sim::addVar(3021, 'Umgebungshelligkeit', VARIABLETYPE_INTEGER, $ambient);
+    $m->properties['LightSwitchVariableID'] = 3011;
+    $m->properties['LightBrightnessVariableID'] = 3013;
+    $m->properties['LightDayVariableID'] = 3020;
+    $m->properties['LightAmbientVariableID'] = 3021;
+    $m->properties['PerimeterHooks'] = json_encode([
+        ['Key' => 'garten', 'Name' => 'Kamera Garten', 'Modes' => 4, 'DarkOnly' => false, 'Push' => true, 'Signal' => false, 'Light' => true],
+    ]);
+    $m->ApplyChanges();
+    return $m;
+}
+$m = lightSetup(false);
+check('Tag-Variable wird überwacht', in_array(3020, $m->watched, true));
+Sim::reset();
+hook($m, '/hook/alarm', ['trigger' => 'garten']);
+check('Nacht + Bewegung: an, 100 % (Hue 0-100), 10 min', Sim::$vars[3011]['value'] === true && Sim::$vars[3013]['value'] === 100
+    && $m->timers['LightTimer'] === 600000);
+check('"nie": keine Perimeter-Warnung', Sim::$pushes === []);
+hook($m, '/hook/alarm', ['trigger' => 'garten', 'motion' => '0']);
+check('motion=0 ignoriert', $m->timers['LightTimer'] === 600000);
+$m->RequestAction('LightElapsed', 0);
+check('Nach Ablauf nachts: Grundhelligkeit 50 %', Sim::$vars[3011]['value'] === true && Sim::$vars[3013]['value'] === 50 && $m->timers['LightTimer'] === 0);
+Sim::update(3020, true);
+check('Tag beginnt: aus', Sim::$vars[3011]['value'] === false);
+Sim::update(3020, false);
+check('Nacht beginnt: Grundhelligkeit', Sim::$vars[3011]['value'] === true && Sim::$vars[3013]['value'] === 50);
+hook($m, '/hook/alarm', ['trigger' => 'garten']);
+Sim::update(3020, true);
+check('Tag/Nacht-Wechsel während Bewegungszeit: bleibt 100 %', Sim::$vars[3013]['value'] === 100);
+$m->RequestAction('LightElapsed', 0);
+check('Ablauf am Tag: aus', Sim::$vars[3011]['value'] === false);
+
+$m = lightSetup(true, 80);
+hook($m, '/hook/alarm', ['trigger' => 'garten']);
+check('Tag und hell: keine Aktion', Sim::$vars[3011]['value'] === false && $m->timers['LightTimer'] === 0);
+Sim::$vars[3021]['value'] = 5;
+hook($m, '/hook/alarm', ['trigger' => 'garten']);
+check('Tag, aber dunkel: an', Sim::$vars[3011]['value'] === true && Sim::$vars[3013]['value'] === 100);
+
+$m = lightSetup(false);
+$m->properties['SignalLights'] = json_encode([['InstanceID' => 3001]]);
+$m->properties['PerimeterHooks'] = json_encode([
+    ['Key' => 'garten', 'Name' => 'Kamera Garten', 'Modes' => 0, 'DarkOnly' => false, 'Push' => true, 'Signal' => true, 'Light' => true],
+]);
+$m->ApplyChanges();
+hook($m, '/hook/alarm', ['trigger' => 'garten']);
+check('Bewegung + Signal: Lampe blinkt rot statt Bewegungslicht', $m->timers['SignalTimer'] === 1000 && Sim::$vars[3012]['value'] === 0xFF0000);
+$m->attributes['SignalUntil'] = time() - 1;
+$m->RequestAction('SignalElapsed', 0);
+check('Nach dem Signal: Bewegungslicht 100 %, weiß', $m->timers['SignalTimer'] === 0 && Sim::$vars[3011]['value'] === true
+    && Sim::$vars[3013]['value'] === 100 && Sim::$vars[3012]['value'] === 0xFFFFFF);
+
 echo $failures === 0 ? "\nAlle Tests bestanden.\n" : "\n$failures Test(s) fehlgeschlagen.\n";
 exit($failures === 0 ? 0 : 1);
