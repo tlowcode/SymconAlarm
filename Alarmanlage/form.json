@@ -18,14 +18,27 @@
                             "name": "VariableID",
                             "width": "350px",
                             "add": 0,
-                            "edit": { "type": "SelectVariable" }
+                            "edit": {
+                                "type": "SelectVariable"
+                            }
                         },
                         {
                             "caption": "Name (leer = Variablenname)",
                             "name": "Name",
                             "width": "auto",
                             "add": "",
-                            "edit": { "type": "ValidationTextBox" }
+                            "edit": {
+                                "type": "ValidationTextBox"
+                            }
+                        },
+                        {
+                            "caption": "Eingangsweg",
+                            "name": "EntryRoute",
+                            "width": "130px",
+                            "add": false,
+                            "edit": {
+                                "type": "CheckBox"
+                            }
                         }
                     ]
                 },
@@ -47,14 +60,27 @@
                             "name": "VariableID",
                             "width": "350px",
                             "add": 0,
-                            "edit": { "type": "SelectVariable" }
+                            "edit": {
+                                "type": "SelectVariable"
+                            }
                         },
                         {
                             "caption": "Name (leer = Variablenname)",
                             "name": "Name",
                             "width": "auto",
                             "add": "",
-                            "edit": { "type": "ValidationTextBox" }
+                            "edit": {
+                                "type": "ValidationTextBox"
+                            }
+                        },
+                        {
+                            "caption": "Eingangsweg",
+                            "name": "EntryRoute",
+                            "width": "130px",
+                            "add": false,
+                            "edit": {
+                                "type": "CheckBox"
+                            }
                         }
                     ]
                 },
@@ -71,16 +97,24 @@
                             "name": "VariableID",
                             "width": "350px",
                             "add": 0,
-                            "edit": { "type": "SelectVariable" }
+                            "edit": {
+                                "type": "SelectVariable"
+                            }
                         },
                         {
                             "caption": "Name (leer = Variablenname)",
                             "name": "Name",
                             "width": "auto",
                             "add": "",
-                            "edit": { "type": "ValidationTextBox" }
+                            "edit": {
+                                "type": "ValidationTextBox"
+                            }
                         }
                     ]
+                },
+                {
+                    "type": "Label",
+                    "caption": "Eingangsweg: Wer durch eine Eingangsweg-Tür kommt, darf auf Eingangsweg-Meldern laufen, ohne dass der Voralarm sofort zum Alarm wird. Bewegung ohne vorherige Tür löst weiterhin sofort aus."
                 }
             ]
         },
@@ -111,21 +145,27 @@
                             "name": "VariableID",
                             "width": "300px",
                             "add": 0,
-                            "edit": { "type": "SelectVariable" }
+                            "edit": {
+                                "type": "SelectVariable"
+                            }
                         },
                         {
                             "caption": "Wert scharf",
                             "name": "ArmedValue",
                             "width": "120px",
                             "add": 1,
-                            "edit": { "type": "NumberSpinner" }
+                            "edit": {
+                                "type": "NumberSpinner"
+                            }
                         },
                         {
                             "caption": "Wert unscharf",
                             "name": "DisarmedValue",
                             "width": "120px",
                             "add": 0,
-                            "edit": { "type": "NumberSpinner" }
+                            "edit": {
+                                "type": "NumberSpinner"
+                            }
                         },
                         {
                             "caption": "Gilt als scharf bei",
@@ -135,9 +175,18 @@
                             "edit": {
                                 "type": "Select",
                                 "options": [
-                                    { "caption": "Abwesend und Nacht", "value": 0 },
-                                    { "caption": "nur Abwesend", "value": 1 },
-                                    { "caption": "nur Nacht", "value": 2 }
+                                    {
+                                        "caption": "Abwesend und Nacht",
+                                        "value": 0
+                                    },
+                                    {
+                                        "caption": "nur Abwesend",
+                                        "value": 1
+                                    },
+                                    {
+                                        "caption": "nur Nacht",
+                                        "value": 2
+                                    }
                                 ]
                             }
                         }
@@ -187,21 +236,37 @@
                             "name": "UserID",
                             "width": "150px",
                             "add": 1,
-                            "edit": { "type": "NumberSpinner" }
+                            "edit": {
+                                "type": "NumberSpinner"
+                            }
                         },
                         {
                             "caption": "Finger-ID (-1 = jeder Finger)",
                             "name": "FingerID",
                             "width": "220px",
                             "add": -1,
-                            "edit": { "type": "NumberSpinner", "minimum": -1 }
+                            "edit": {
+                                "type": "NumberSpinner",
+                                "minimum": -1
+                            }
+                        },
+                        {
+                            "caption": "Überfall-Finger",
+                            "name": "Duress",
+                            "width": "150px",
+                            "add": false,
+                            "edit": {
+                                "type": "CheckBox"
+                            }
                         },
                         {
                             "caption": "Name",
                             "name": "Name",
                             "width": "auto",
                             "add": "",
-                            "edit": { "type": "ValidationTextBox" }
+                            "edit": {
+                                "type": "ValidationTextBox"
+                            }
                         }
                     ]
                 },
@@ -209,6 +274,10 @@
                     "type": "CheckBox",
                     "name": "EkeyNotifyRejected",
                     "caption": "Push bei nicht berechtigtem Fingerabdruck, solange scharf"
+                },
+                {
+                    "type": "Label",
+                    "caption": "Überfall-Finger: entschärft ganz normal, löst aber im Hintergrund einen stillen Alarm aus (siehe \"Überfall und Panik\"). Eine Zeile mit genauer Finger-ID hat Vorrang vor \"jeder Finger\" (-1)."
                 }
             ]
         },
@@ -229,7 +298,9 @@
                             "name": "VariableID",
                             "width": "auto",
                             "add": 0,
-                            "edit": { "type": "SelectVariable" }
+                            "edit": {
+                                "type": "SelectVariable"
+                            }
                         }
                     ]
                 },
@@ -246,14 +317,18 @@
                             "name": "SwitchVariableID",
                             "width": "350px",
                             "add": 0,
-                            "edit": { "type": "SelectVariable" }
+                            "edit": {
+                                "type": "SelectVariable"
+                            }
                         },
                         {
                             "caption": "Helligkeit (optional)",
                             "name": "BrightnessVariableID",
                             "width": "auto",
                             "add": 0,
-                            "edit": { "type": "SelectVariable" }
+                            "edit": {
+                                "type": "SelectVariable"
+                            }
                         }
                     ]
                 },
@@ -270,14 +345,18 @@
                             "name": "SwitchVariableID",
                             "width": "350px",
                             "add": 0,
-                            "edit": { "type": "SelectVariable" }
+                            "edit": {
+                                "type": "SelectVariable"
+                            }
                         },
                         {
                             "caption": "Helligkeit (optional)",
                             "name": "BrightnessVariableID",
                             "width": "auto",
                             "add": 0,
-                            "edit": { "type": "SelectVariable" }
+                            "edit": {
+                                "type": "SelectVariable"
+                            }
                         }
                     ]
                 },
@@ -294,14 +373,18 @@
                             "name": "VariableID",
                             "width": "350px",
                             "add": 0,
-                            "edit": { "type": "SelectVariable" }
+                            "edit": {
+                                "type": "SelectVariable"
+                            }
                         },
                         {
                             "caption": "Wert für \"ganz auf\" (Auf/Ab: 0, Position: 0)",
                             "name": "OpenValue",
                             "width": "auto",
                             "add": 0,
-                            "edit": { "type": "NumberSpinner" }
+                            "edit": {
+                                "type": "NumberSpinner"
+                            }
                         }
                     ]
                 }
@@ -324,7 +407,9 @@
                             "name": "VariableID",
                             "width": "auto",
                             "add": 0,
-                            "edit": { "type": "SelectVariable" }
+                            "edit": {
+                                "type": "SelectVariable"
+                            }
                         }
                     ]
                 },
@@ -333,11 +418,29 @@
                     "name": "TextReplaceUmlauts",
                     "caption": "Umlaute ersetzen und Sonderzeichen entfernen (für DPT16.000 ASCII)"
                 },
-                { "type": "Label", "caption": "Zustandsmeldungen bleiben stehen, bis der Zustand endet, und werden dann mit leerem Text zurückgenommen:" },
-                { "type": "CheckBox", "name": "TextAlarm", "caption": "Alarm mit erstem Auslöser, bis unscharf (\"ALARM Haustuer\")" },
-                { "type": "CheckBox", "name": "TextPreAlarm", "caption": "Voralarm (\"Voralarm 30s\")" },
-                { "type": "CheckBox", "name": "TextExcluded", "caption": "Ausgeklammerte Kontakte, bis geschlossen (\"Offen: Kueche\", \"3 Kont. offen\"), Hinweis beim Schließen (\"OK: Kueche\")" },
-                { "type": "Label", "caption": "Hinweise werden nach der Anzeigedauer wieder ausgeblendet:" },
+                {
+                    "type": "Label",
+                    "caption": "Zustandsmeldungen bleiben stehen, bis der Zustand endet, und werden dann mit leerem Text zurückgenommen:"
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "TextAlarm",
+                    "caption": "Alarm mit erstem Auslöser, bis unscharf (\"ALARM Haustuer\")"
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "TextPreAlarm",
+                    "caption": "Voralarm (\"Voralarm 30s\")"
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "TextExcluded",
+                    "caption": "Ausgeklammerte Kontakte, bis geschlossen (\"Offen: Kueche\", \"3 Kont. offen\"), Hinweis beim Schließen (\"OK: Kueche\")"
+                },
+                {
+                    "type": "Label",
+                    "caption": "Hinweise werden nach der Anzeigedauer wieder ausgeblendet:"
+                },
                 {
                     "type": "NumberSpinner",
                     "name": "TextInfoDuration",
@@ -345,11 +448,35 @@
                     "suffix": " s",
                     "minimum": 0
                 },
-                { "type": "CheckBox", "name": "TextArmed", "caption": "Scharf (\"Scharf Nacht\", \"Scharf Abwes.\")" },
-                { "type": "CheckBox", "name": "TextDisarmed", "caption": "Unscharf (\"Unscharf\")" },
-                { "type": "CheckBox", "name": "TextSirenOff", "caption": "Sirene aus (\"Sirene aus\")" },
-                { "type": "CheckBox", "name": "TextEkeyRejected", "caption": "ekey: nicht berechtigter Finger, solange scharf (\"Finger abgel.\")" },
-                { "type": "Label", "caption": "Countdown (zweite Meldung, sekündlich aktualisiert, danach mit leerem Text zurückgenommen):" },
+                {
+                    "type": "CheckBox",
+                    "name": "TextArmed",
+                    "caption": "Scharf (\"Scharf Nacht\", \"Scharf Abwes.\")"
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "TextDisarmed",
+                    "caption": "Unscharf (\"Unscharf\")"
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "TextSirenOff",
+                    "caption": "Sirene aus (\"Sirene aus\")"
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "TextEkeyRejected",
+                    "caption": "ekey: nicht berechtigter Finger, solange scharf (\"Finger abgel.\")"
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "TextReminder",
+                    "caption": "Erinnerung Schärfen vergessen (\"Nicht scharf!\")"
+                },
+                {
+                    "type": "Label",
+                    "caption": "Countdown (zweite Meldung, sekündlich aktualisiert, danach mit leerem Text zurückgenommen):"
+                },
                 {
                     "type": "List",
                     "name": "CountdownOutputs",
@@ -363,13 +490,27 @@
                             "name": "VariableID",
                             "width": "auto",
                             "add": 0,
-                            "edit": { "type": "SelectVariable" }
+                            "edit": {
+                                "type": "SelectVariable"
+                            }
                         }
                     ]
                 },
-                { "type": "CheckBox", "name": "CountdownArm", "caption": "Schärf-Verzögerung Nacht und Abwesend (\"Scharf in 25s\", \"Scharf in 4:59\")" },
-                { "type": "CheckBox", "name": "CountdownPreAlarm", "caption": "Voralarm (\"Alarm in 25s\")" },
-                { "type": "CheckBox", "name": "CountdownTimeOnly", "caption": "Nur die Zeit ausgeben (\"25s\", \"4:59\")" }
+                {
+                    "type": "CheckBox",
+                    "name": "CountdownArm",
+                    "caption": "Schärf-Verzögerung Nacht und Abwesend (\"Scharf in 25s\", \"Scharf in 4:59\")"
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "CountdownPreAlarm",
+                    "caption": "Voralarm (\"Alarm in 25s\")"
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "CountdownTimeOnly",
+                    "caption": "Nur die Zeit ausgeben (\"25s\", \"4:59\")"
+                }
             ]
         },
         {
@@ -436,6 +577,212 @@
         },
         {
             "type": "ExpansionPanel",
+            "caption": "Überfall und Panik",
+            "items": [
+                {
+                    "type": "List",
+                    "name": "PanicInputs",
+                    "caption": "Panik-Taster (1 = ausgelöst)",
+                    "rowCount": 4,
+                    "add": true,
+                    "delete": true,
+                    "columns": [
+                        {
+                            "caption": "Variable",
+                            "name": "VariableID",
+                            "width": "350px",
+                            "add": 0,
+                            "edit": {
+                                "type": "SelectVariable"
+                            }
+                        },
+                        {
+                            "caption": "Name (leer = Variablenname)",
+                            "name": "Name",
+                            "width": "auto",
+                            "add": "",
+                            "edit": {
+                                "type": "ValidationTextBox"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "PanicSilent",
+                    "caption": "Panik-Taster lösen stillen Alarm aus (sonst voller Alarm mit Sirene, unabhängig vom Modus)"
+                },
+                {
+                    "type": "Label",
+                    "caption": "Stiller Alarm (Überfall-Finger oder stiller Panik-Taster): keine Sirene, kein Licht, keine Anzeige. Variable \"Stiller Alarm\" wird gesetzt und bleibt bis zum nächsten Schärfen oder \"Stillen Alarm zurücksetzen\"."
+                },
+                {
+                    "type": "List",
+                    "name": "SilentAlarmOutputs",
+                    "caption": "Ausgänge bei stillem Alarm",
+                    "rowCount": 3,
+                    "add": true,
+                    "delete": true,
+                    "columns": [
+                        {
+                            "caption": "Variable",
+                            "name": "VariableID",
+                            "width": "350px",
+                            "add": 0,
+                            "edit": {
+                                "type": "SelectVariable"
+                            }
+                        },
+                        {
+                            "caption": "Wert",
+                            "name": "Value",
+                            "width": "120px",
+                            "add": 1,
+                            "edit": {
+                                "type": "NumberSpinner"
+                            }
+                        },
+                        {
+                            "caption": "Rücksetzwert",
+                            "name": "ResetValue",
+                            "width": "140px",
+                            "add": 0,
+                            "edit": {
+                                "type": "NumberSpinner"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "type": "SelectScript",
+                    "name": "SilentAlarmScriptID",
+                    "caption": "Skript bei stillem Alarm ($_IPS['ALARM_REASON'])"
+                },
+                {
+                    "type": "SelectInstance",
+                    "name": "SilentVisuID",
+                    "caption": "Visualisierung für stillen Alarm (leer = Standard)"
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "Erinnerung \"Schärfen vergessen\"",
+            "items": [
+                {
+                    "type": "CheckBox",
+                    "name": "ReminderEnabled",
+                    "caption": "Erinnern, wenn abends noch nicht scharf geschaltet ist (jemand zuhause)"
+                },
+                {
+                    "type": "SelectTime",
+                    "name": "ReminderTime",
+                    "caption": "Uhrzeit"
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "ReminderRepeatMinutes",
+                    "caption": "Wiederholen alle",
+                    "suffix": "min",
+                    "minimum": 0
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "ReminderMaxCount",
+                    "caption": "Höchstens",
+                    "suffix": "mal",
+                    "minimum": 1
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
+            "caption": "Anwesenheitssimulation (nur \"Abwesend\")",
+            "items": [
+                {
+                    "type": "CheckBox",
+                    "name": "SimEnabled",
+                    "caption": "Lichter zufällig schalten, solange \"Abwesend\" scharf ist"
+                },
+                {
+                    "type": "List",
+                    "name": "SimLights",
+                    "caption": "Lichter (Schalt-Variablen)",
+                    "rowCount": 5,
+                    "add": true,
+                    "delete": true,
+                    "columns": [
+                        {
+                            "caption": "Variable",
+                            "name": "VariableID",
+                            "width": "350px",
+                            "add": 0,
+                            "edit": {
+                                "type": "SelectVariable"
+                            }
+                        },
+                        {
+                            "caption": "Name (leer = Variablenname)",
+                            "name": "Name",
+                            "width": "auto",
+                            "add": "",
+                            "edit": {
+                                "type": "ValidationTextBox"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "type": "SelectVariable",
+                    "name": "SimDayVariableID",
+                    "caption": "Tag-Variable (true = Tag, Simulation nur bei Dunkelheit)"
+                },
+                {
+                    "type": "SelectTime",
+                    "name": "SimStartTime",
+                    "caption": "Frühestens ab"
+                },
+                {
+                    "type": "SelectTime",
+                    "name": "SimEndTime",
+                    "caption": "Spätestens bis"
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "SimOnMin",
+                    "caption": "Leuchtdauer min.",
+                    "suffix": "min",
+                    "minimum": 1
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "SimOnMax",
+                    "caption": "Leuchtdauer max.",
+                    "suffix": "min",
+                    "minimum": 1
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "SimOffMin",
+                    "caption": "Pause min.",
+                    "suffix": "min",
+                    "minimum": 1
+                },
+                {
+                    "type": "NumberSpinner",
+                    "name": "SimOffMax",
+                    "caption": "Pause max.",
+                    "suffix": "min",
+                    "minimum": 1
+                },
+                {
+                    "type": "Label",
+                    "caption": "Am Ende des Zeitfensters oder bei Tag werden die von der Simulation eingeschalteten Lichter ausgeschaltet. Beim Unscharfschalten bleiben sie, wie sie sind."
+                }
+            ]
+        },
+        {
+            "type": "ExpansionPanel",
             "caption": "Apple HomeKit Sicherheitssystem",
             "items": [
                 {
@@ -443,9 +790,18 @@
                     "name": "HomeKitSource",
                     "caption": "HomeKit-Variable",
                     "options": [
-                        { "caption": "Keine", "value": 0 },
-                        { "caption": "Vom Modul anlegen (in der HomeKit Bridge auswählen)", "value": 1 },
-                        { "caption": "Vorhandene Variable verwenden", "value": 2 }
+                        {
+                            "caption": "Keine",
+                            "value": 0
+                        },
+                        {
+                            "caption": "Vom Modul anlegen (in der HomeKit Bridge auswählen)",
+                            "value": 1
+                        },
+                        {
+                            "caption": "Vorhandene Variable verwenden",
+                            "value": 2
+                        }
                     ]
                 },
                 {
@@ -458,8 +814,14 @@
                     "name": "HomeKitHomeAs",
                     "caption": "HomeKit \"Zuhause\" bedeutet",
                     "options": [
-                        { "caption": "Scharf (Nacht)", "value": 2 },
-                        { "caption": "Ignorieren", "value": -1 }
+                        {
+                            "caption": "Scharf (Nacht)",
+                            "value": 2
+                        },
+                        {
+                            "caption": "Ignorieren",
+                            "value": -1
+                        }
                     ]
                 },
                 {
@@ -498,16 +860,57 @@
         }
     ],
     "actions": [
-        { "type": "Button", "caption": "Scharf (Nacht)", "onClick": "ALARM_ArmNight($id);" },
-        { "type": "Button", "caption": "Scharf (Abwesend)", "onClick": "ALARM_ArmAway($id);" },
-        { "type": "Button", "caption": "Unscharf", "onClick": "ALARM_Disarm($id);" },
-        { "type": "Button", "caption": "Status anzeigen", "onClick": "echo ALARM_GetStatusText($id);" },
-        { "type": "Button", "caption": "Testprotokoll anzeigen", "onClick": "echo ALARM_GetTestReport($id);" },
-        { "type": "Button", "caption": "Testprotokoll löschen", "onClick": "ALARM_ResetTestLog($id); echo 'Testprotokoll gelöscht.';" }
+        {
+            "type": "Button",
+            "caption": "Scharf (Nacht)",
+            "onClick": "ALARM_ArmNight($id);"
+        },
+        {
+            "type": "Button",
+            "caption": "Scharf (Abwesend)",
+            "onClick": "ALARM_ArmAway($id);"
+        },
+        {
+            "type": "Button",
+            "caption": "Unscharf",
+            "onClick": "ALARM_Disarm($id);"
+        },
+        {
+            "type": "Button",
+            "caption": "Stillen Alarm zurücksetzen",
+            "onClick": "ALARM_ResetSilentAlarm($id);"
+        },
+        {
+            "type": "Button",
+            "caption": "Status anzeigen",
+            "onClick": "echo ALARM_GetStatusText($id);"
+        },
+        {
+            "type": "Button",
+            "caption": "Testprotokoll anzeigen",
+            "onClick": "echo ALARM_GetTestReport($id);"
+        },
+        {
+            "type": "Button",
+            "caption": "Testprotokoll löschen",
+            "onClick": "ALARM_ResetTestLog($id); echo 'Testprotokoll gelöscht.';"
+        }
     ],
     "status": [
-        { "code": 102, "icon": "active", "caption": "Alarmanlage bereit" },
-        { "code": 104, "icon": "inactive", "caption": "Keine Tür-/Fensterkontakte konfiguriert" },
-        { "code": 201, "icon": "error", "caption": "Mindestens eine konfigurierte Variable existiert nicht (siehe Meldungen)" }
+        {
+            "code": 102,
+            "icon": "active",
+            "caption": "Alarmanlage bereit"
+        },
+        {
+            "code": 104,
+            "icon": "inactive",
+            "caption": "Keine Tür-/Fensterkontakte konfiguriert"
+        },
+        {
+            "code": 201,
+            "icon": "error",
+            "caption": "Mindestens eine konfigurierte Variable existiert nicht (siehe Meldungen)"
+        }
     ]
 }

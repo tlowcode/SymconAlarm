@@ -546,5 +546,136 @@ $m->ApplyChanges();
 Sim::update(MOTION_FLUR, true);
 check('Ohne Testmodus kein Protokoll, Berichtsvariable entfernt', json_decode($m->attributes['TestLog'], true) === [] && !array_key_exists('TestReport', $m->values));
 
+echo "Eingangsweg\n";
+function entrySetup(): Alarmanlage
+{
+    $m = setup();
+    $m->properties['Contacts'] = json_encode([['VariableID' => DOOR, 'Name' => '', 'EntryRoute' => true], ['VariableID' => WINDOW, 'Name' => 'Küche', 'EntryRoute' => false]]);
+    $m->properties['MotionSensors'] = json_encode([['VariableID' => MOTION_WZ, 'Name' => 'Wohnzimmer', 'EntryRoute' => false], ['VariableID' => MOTION_FLUR, 'Name' => 'Flur EG', 'EntryRoute' => true]]);
+    $m->ApplyChanges();
+    return $m;
+}
+$m = entrySetup();
+armAway();
+Sim::update(DOOR, true);
+Sim::update(MOTION_FLUR, true);
+check('Abwesend: Haustür + Flur-BWM bleibt Voralarm', state($m) === 1);
+Sim::update(MOTION_WZ, true);
+check('Wohnzimmer-BWM eskaliert trotzdem sofort', state($m) === 3);
+
+$m = entrySetup();
+armAway();
+Sim::update(WINDOW, true);
+Sim::update(MOTION_FLUR, true);
+check('Voralarm durch Küchenfenster: Flur-BWM eskaliert', state($m) === 3);
+
+$m = entrySetup();
+armAway();
+Sim::update(MOTION_FLUR, true);
+check('Abwesend: Flur-BWM ohne Kontakt löst sofort aus', state($m) === 2);
+
+$m = entrySetup();
+Sim::update(REQUEST, true);
+Sim::fireTimer();
+Sim::update(DOOR, true);
+Sim::update(MOTION_FLUR, true);
+check('Nacht: Haustür + Flur-BWM bleibt Voralarm', state($m) === 1);
+Sim::update(MOTION_WZ, true);
+check('Nacht: Wohnzimmer-BWM eskaliert', state($m) === 3);
+
+echo "Überfall-Finger und Panik\n";
+$m = setup();
+Sim::addVar(1201, 'Stiller Ausgang', VARIABLETYPE_BOOLEAN, false);
+$m->properties['EkeyUsers'] = json_encode([
+    ['UserID' => 1, 'FingerID' => -1, 'Name' => 'Thilo', 'Duress' => false],
+    ['UserID' => 1, 'FingerID' => 9, 'Name' => 'Thilo', 'Duress' => true],
+]);
+$m->properties['SilentAlarmOutputs'] = json_encode([['VariableID' => 1201, 'Value' => 1, 'ResetValue' => 0]]);
+$m->properties['SilentAlarmScriptID'] = 88888;
+$m->ApplyChanges();
+armAway();
+Sim::reset();
+scan(1, 9);
+check('Überfall-Finger entschärft ganz normal', mode($m) === 0);
+check('Stiller Alarm gesetzt, Ausgang geschaltet, Skript gestartet', $m->values['SilentAlarm'] === true
+    && Sim::$vars[1201]['value'] === true && (bool) array_filter(Sim::$actions, fn ($a) => $a[0] === 'script'));
+check('Push "STILLER ALARM", keine Sirene', (bool) preg_grep('/^STILLER ALARM/', Sim::$pushes) && !in_array([SIREN, true], Sim::$actions, true));
+check('Keine Anzeige auf dem Display', strpos((string) Sim::$vars[TEXT]['value'], 'ALARM') === false);
+$m->ResetSilentAlarm();
+check('Zurücksetzen', $m->values['SilentAlarm'] === false && Sim::$vars[1201]['value'] === false);
+armAway();
+scan(1, 3);
+check('Normaler Finger: kein stiller Alarm', mode($m) === 0 && $m->values['SilentAlarm'] === false);
+
+$m = setup();
+Sim::addVar(1301, 'Panik Schlafzimmer', VARIABLETYPE_BOOLEAN, false);
+$m->properties['PanicInputs'] = json_encode([['VariableID' => 1301, 'Name' => 'Schlafzimmer']]);
+$m->ApplyChanges();
+Sim::update(1301, true);
+check('Panik im Modus Unscharf: voller Alarm', state($m) === 3 && $m->values['Trigger'] === 'Panik Schlafzimmer');
+Sim::update(REQUEST, true);
+check('Schärfen während Alarm wird abgelehnt', $m->attributes['NextStep'] === 'sirenOff' && mode($m) === 0);
+Sim::update(REQUEST, false);
+check('Scharf Request 0 beendet Panikalarm', state($m) === 0);
+Sim::update(1301, false);
+$m->properties['PanicSilent'] = true;
+Sim::reset();
+Sim::update(1301, true);
+check('Stiller Panik-Taster: kein Alarm, stiller Alarm', state($m) === 0 && $m->values['SilentAlarm'] === true);
+$m->properties['PanicSilent'] = false;
+$m->Panic();
+$m->Disarm();
+check('ALARM_Panic und ALARM_Disarm', state($m) === 0 && $m->values['AlarmActive'] === false);
+
+echo "Erinnerung Schärfen vergessen\n";
+$m = setup();
+$m->properties['ReminderEnabled'] = true;
+$m->properties['ReminderMaxCount'] = 2;
+$m->ApplyChanges();
+check('Timer auf nächste Erinnerungszeit', $m->timers['ReminderTimer'] > 0 && $m->timers['ReminderTimer'] <= 86400000);
+Sim::$vars[WINDOW]['value'] = true;
+$m->RequestAction('ReminderElapsed', 0);
+check('Push mit offenem Fenster', (bool) preg_grep('/noch nicht scharf\. Offen: Küche/', Sim::$pushes));
+check('Wiederholung in 15 min', $m->timers['ReminderTimer'] === 15 * 60 * 1000);
+check('DPT16 Hinweis', in_array('Nicht scharf!', texts(), true));
+Sim::reset();
+$m->RequestAction('ReminderElapsed', 0);
+check('Nach max. Anzahl wieder auf den nächsten Tag', count(Sim::$pushes) === 1 && $m->attributes['ReminderCount'] === 0
+    && $m->timers['ReminderTimer'] !== 15 * 60 * 1000);
+Sim::reset();
+Sim::update(REQUEST, true);
+Sim::fireTimer();
+$m->RequestAction('ReminderElapsed', 0);
+check('Scharf: keine Erinnerung', !preg_grep('/Schärfen vergessen/', Sim::$pushes));
+
+echo "Anwesenheitssimulation\n";
+$m = setup();
+Sim::addVar(1401, 'Licht Küche', VARIABLETYPE_BOOLEAN, false);
+Sim::addVar(1402, 'Licht Bad', VARIABLETYPE_BOOLEAN, false);
+Sim::addVar(1403, 'Es ist Tag', VARIABLETYPE_BOOLEAN, false);
+$m->properties['SimEnabled'] = true;
+$m->properties['SimLights'] = json_encode([['VariableID' => 1401, 'Name' => ''], ['VariableID' => 1402, 'Name' => '']]);
+$m->properties['SimDayVariableID'] = 1403;
+$m->properties['SimStartTime'] = '{"hour":0,"minute":0,"second":0}';
+$m->properties['SimEndTime'] = '{"hour":24,"minute":0,"second":0}';
+$m->ApplyChanges();
+check('Unscharf: Simulation aus', $m->timers['SimTimer'] === 0);
+armAway();
+check('Abwesend: Simulation läuft minütlich', $m->timers['SimTimer'] === 60000 && count(json_decode($m->attributes['SimState'], true)) === 2);
+$m->attributes['SimState'] = json_encode(['1401' => [false, 0], '1402' => [false, time() + 3600]]);
+$m->RequestAction('SimElapsed', 0);
+$sim = json_decode($m->attributes['SimState'], true);
+check('Fälliges Licht geht an, anderes wartet', Sim::$vars[1401]['value'] === true && Sim::$vars[1402]['value'] === false
+    && $sim['1401'][1] >= time() + 20 * 60 && $sim['1401'][1] <= time() + 90 * 60);
+Sim::update(1403, true);
+$m->RequestAction('SimElapsed', 0);
+check('Bei Tag: eingeschaltete Lichter wieder aus', Sim::$vars[1401]['value'] === false && $m->attributes['SimState'] === '{}');
+Sim::update(1403, false);
+$m->RequestAction('SimElapsed', 0);
+$m->attributes['SimState'] = json_encode(['1401' => [false, 0], '1402' => [false, time() + 3600]]);
+$m->RequestAction('SimElapsed', 0);
+Sim::update(THILO, true);
+check('Heimkommen: Simulation stoppt, Licht bleibt an', $m->timers['SimTimer'] === 0 && Sim::$vars[1401]['value'] === true);
+
 echo $failures === 0 ? "\nAlle Tests bestanden.\n" : "\n$failures Test(s) fehlgeschlagen.\n";
 exit($failures === 0 ? 0 : 1);

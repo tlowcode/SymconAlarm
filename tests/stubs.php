@@ -172,6 +172,12 @@ function RequestAction($id, $value)
     Sim::$actions[] = [$id, $value];
     return true;
 }
+function IPS_ScriptExists($id) { return $id === 88888; }
+function IPS_RunScriptEx($id, $params)
+{
+    Sim::$actions[] = ['script', $id, $params['ALARM_REASON']];
+    return true;
+}
 function VISU_PostNotificationEx($id, $title, $text, $icon, $sound, $target)
 {
     Sim::$pushes[] = "$title: $text";

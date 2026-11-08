@@ -39,7 +39,7 @@ class Alarmanlage extends IPSModule
     private string $testNote = '';
 
     /** Kategorien der DPT16-Textausgabe, Property heißt jeweils "Text" + Schlüssel */
-    private const TEXT_CATEGORIES = ['Armed', 'Disarmed', 'Excluded', 'PreAlarm', 'Alarm', 'SirenOff', 'EkeyRejected'];
+    private const TEXT_CATEGORIES = ['Armed', 'Disarmed', 'Excluded', 'PreAlarm', 'Alarm', 'SirenOff', 'EkeyRejected', 'Reminder'];
 
     private const STATUS_OK = 102;
     private const STATUS_NO_CONTACTS = 104;
@@ -65,6 +65,27 @@ class Alarmanlage extends IPSModule
         $this->RegisterPropertyInteger('EkeyActionValue', 1);
         $this->RegisterPropertyString('EkeyUsers', '[]');
         $this->RegisterPropertyBoolean('EkeyNotifyRejected', true);
+
+        $this->RegisterPropertyString('PanicInputs', '[]');
+        $this->RegisterPropertyBoolean('PanicSilent', false);
+        $this->RegisterPropertyString('SilentAlarmOutputs', '[]');
+        $this->RegisterPropertyInteger('SilentAlarmScriptID', 0);
+        $this->RegisterPropertyInteger('SilentVisuID', 0);
+
+        $this->RegisterPropertyBoolean('ReminderEnabled', false);
+        $this->RegisterPropertyString('ReminderTime', '{"hour":23,"minute":0,"second":0}');
+        $this->RegisterPropertyInteger('ReminderRepeatMinutes', 15);
+        $this->RegisterPropertyInteger('ReminderMaxCount', 3);
+
+        $this->RegisterPropertyBoolean('SimEnabled', false);
+        $this->RegisterPropertyString('SimLights', '[]');
+        $this->RegisterPropertyInteger('SimDayVariableID', 0);
+        $this->RegisterPropertyString('SimStartTime', '{"hour":17,"minute":0,"second":0}');
+        $this->RegisterPropertyString('SimEndTime', '{"hour":23,"minute":30,"second":0}');
+        $this->RegisterPropertyInteger('SimOnMin', 20);
+        $this->RegisterPropertyInteger('SimOnMax', 90);
+        $this->RegisterPropertyInteger('SimOffMin', 10);
+        $this->RegisterPropertyInteger('SimOffMax', 60);
 
         $this->RegisterPropertyString('Sirens', '[]');
         $this->RegisterPropertyString('AlarmLights', '[]');
@@ -111,10 +132,15 @@ class Alarmanlage extends IPSModule
         $this->RegisterAttributeBoolean('HomeKitHome', false);
         $this->RegisterAttributeString('HomeKitWrites', '[]');
         $this->RegisterAttributeString('TestLog', '{}');
+        $this->RegisterAttributeBoolean('PreAlarmEntry', false);
+        $this->RegisterAttributeInteger('ReminderCount', 0);
+        $this->RegisterAttributeString('SimState', '{}');
 
         $this->RegisterTimer('StepTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'TimerElapsed\', 0);');
         $this->RegisterTimer('TextTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'TextTimerElapsed\', 0);');
         $this->RegisterTimer('CountdownTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'CountdownElapsed\', 0);');
+        $this->RegisterTimer('ReminderTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'ReminderElapsed\', 0);');
+        $this->RegisterTimer('SimTimer', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], \'SimElapsed\', 0);');
 
         $this->ensureProfiles();
         $this->RegisterVariableInteger('Mode', 'Modus', 'Alarm.Mode', 10);
@@ -122,6 +148,7 @@ class Alarmanlage extends IPSModule
         $this->RegisterVariableString('Trigger', 'Auslöser', '', 30);
         $this->RegisterVariableString('Excluded', 'Ausgeklammerte Kontakte', '', 40);
         $this->RegisterVariableBoolean('AlarmActive', 'Alarm ausgelöst', '~Alert', 25);
+        $this->RegisterVariableBoolean('SilentAlarm', 'Stiller Alarm', '~Alert', 26);
     }
 
     public function ApplyChanges()
@@ -153,7 +180,8 @@ class Alarmanlage extends IPSModule
             array_keys($this->presence()),
             [$this->ReadPropertyInteger('ArmRequestVariableID')],
             $this->ekeyIDs(),
-            [$this->externalHomeKitID()]
+            [$this->externalHomeKitID()],
+            array_keys($this->namedList('PanicInputs'))
         );
         foreach ($watch as $id) {
             if ($id <= 0) {
@@ -172,6 +200,14 @@ class Alarmanlage extends IPSModule
                 continue;
             }
             $this->RegisterReference($id);
+        }
+        $scriptID = $this->ReadPropertyInteger('SilentAlarmScriptID');
+        if ($scriptID > 0) {
+            if (IPS_ScriptExists($scriptID)) {
+                $this->RegisterReference($scriptID);
+            } else {
+                $missing[] = $scriptID;
+            }
         }
 
         $ownHomeKit = $this->ReadPropertyInteger('HomeKitSource') === self::HOMEKIT_OWN;
@@ -198,6 +234,8 @@ class Alarmanlage extends IPSModule
                 $this->SetTimerInterval('StepTimer', 1000);
             }
             $this->updateCountdown();
+            $this->scheduleReminder();
+            $this->updateSimulation();
         });
 
         if ($missing) {
@@ -242,6 +280,18 @@ class Alarmanlage extends IPSModule
             case 'HomeKit':
                 $this->lock(function () use ($Value) {
                     $this->onHomeKit((int) $Value);
+                });
+                break;
+
+            case 'ReminderElapsed':
+                $this->lock(function () {
+                    $this->onReminder();
+                });
+                break;
+
+            case 'SimElapsed':
+                $this->lock(function () {
+                    $this->updateSimulation();
                 });
                 break;
 
@@ -294,11 +344,30 @@ class Alarmanlage extends IPSModule
     public function Disarm(): void
     {
         $this->lock(function () {
-            if ($this->mode() !== self::MODE_OFF) {
+            if ($this->mode() !== self::MODE_OFF || $this->state() !== self::STATE_IDLE) {
                 $this->doDisarm('Manuell unscharf geschaltet.');
             } elseif ($this->isArmPending()) {
                 $this->cancelPendingArm('Manuell abgebrochen.');
             }
+        });
+    }
+
+    /** Löst einen Panikalarm aus, z. B. aus einem Skript. */
+    public function Panic(): void
+    {
+        $this->lock(function () {
+            $this->onPanic('Skript');
+        });
+    }
+
+    public function ResetSilentAlarm(): void
+    {
+        $this->lock(function () {
+            $this->SetValue('SilentAlarm', false);
+            foreach ($this->listProperty('SilentAlarmOutputs') as $row) {
+                $this->act((int) $row['VariableID'], $row['ResetValue'] ?? 0);
+            }
+            $this->log('Stiller Alarm zurückgesetzt.');
         });
     }
 
@@ -388,13 +457,16 @@ class Alarmanlage extends IPSModule
         $contacts = $this->contacts();
         $motion = $this->motionSensors();
         $presence = $this->presence();
+        $panic = $this->namedList('PanicInputs');
 
         if (isset($contacts[$id])) {
             $this->onContact($id, (bool) $value);
         } elseif (isset($motion[$id])) {
-            $this->onMotion($motion[$id], (bool) $value);
+            $this->onMotion($id, (bool) $value);
         } elseif (isset($presence[$id])) {
             $this->onPresence($presence[$id], (bool) $value);
+        } elseif (isset($panic[$id]) && $value) {
+            $this->onPanic($panic[$id]);
         }
     }
 
@@ -449,6 +521,10 @@ class Alarmanlage extends IPSModule
             return;
         }
 
+        if ($mode === self::MODE_OFF && $this->state() !== self::STATE_IDLE) {
+            $this->doDisarm('Alarm über Scharf Request beendet.');
+            return;
+        }
         if ($mode === self::MODE_OFF && $this->isArmPending()) {
             $this->cancelPendingArm('Über Scharf Request abgebrochen.');
             return;
@@ -466,6 +542,10 @@ class Alarmanlage extends IPSModule
     private function requestArmNight(): void
     {
         if ($this->mode() !== self::MODE_OFF || $this->ReadAttributeString('NextStep') === 'armNight') {
+            return;
+        }
+        if ($this->state() !== self::STATE_IDLE) {
+            $this->log('Schärfen abgelehnt: Alarm aktiv, zuerst unscharf schalten.');
             return;
         }
         $delay = $this->ReadPropertyInteger('NightArmDelay');
@@ -520,6 +600,8 @@ class Alarmanlage extends IPSModule
                     $this->doDisarm('Über HomeKit unscharf geschaltet.');
                 } elseif ($mode === self::MODE_AWAY) {
                     $this->rejectHomeKit($label, '"Abwesend" darf über HomeKit nicht unscharf geschaltet werden (Formular: HomeKit "Aus" darf auch "Abwesend" unscharf schalten).');
+                } elseif ($this->state() !== self::STATE_IDLE) {
+                    $this->doDisarm('Alarm über HomeKit beendet.');
                 } elseif ($this->isArmPending()) {
                     $this->cancelPendingArm('Über HomeKit abgebrochen.');
                 }
@@ -721,6 +803,10 @@ class Alarmanlage extends IPSModule
         if ($id === $this->ReadPropertyInteger('ArmRequestVariableID')) {
             return ['KNX', 'Scharf Request', $value ? '1' : '0', false];
         }
+        $panic = $this->namedList('PanicInputs');
+        if (isset($panic[$id]) && $changed) {
+            return ['Panik', $panic[$id], $value ? 'ausgelöst' : 'Ende', (bool) $value];
+        }
         if ($id === $this->externalHomeKitID() && $changed) {
             return ['HomeKit', 'Sicherheitssystem', ['Zuhause', 'Abwesend', 'Nacht', 'Aus'][(int) $value] ?? (string) $value, false];
         }
@@ -801,7 +887,8 @@ class Alarmanlage extends IPSModule
         $finger = (int) GetValue($this->ReadPropertyInteger('EkeyFingerVariableID'));
         $actionID = $this->ReadPropertyInteger('EkeyActionVariableID');
         $accepted = $actionID <= 0 || (int) GetValue($actionID) === $this->ReadPropertyInteger('EkeyActionValue');
-        $name = $accepted ? $this->matchEkeyUser($user, $finger) : null;
+        $match = $accepted ? $this->matchEkeyUser($user, $finger) : null;
+        $name = $match['name'] ?? null;
 
         $this->testNote = "Benutzer $user, Finger $finger: " . ($name === null ? 'abgelehnt' : "erkannt ($name)");
         if ($name === null) {
@@ -815,7 +902,12 @@ class Alarmanlage extends IPSModule
             return;
         }
 
-        if ($this->mode() === self::MODE_AWAY) {
+        // Überfall-Finger: nach außen ganz normal, im Hintergrund stiller Alarm
+        if ($match['duress']) {
+            $this->silentAlarm("Überfall-Finger von $name am Fingerscanner benutzt.");
+        }
+
+        if ($this->mode() === self::MODE_AWAY || ($this->mode() === self::MODE_OFF && $this->state() !== self::STATE_IDLE)) {
             $this->doDisarm("Fingerabdruck $name erkannt.");
         } else {
             $this->log("ekey: $name erkannt, \"Abwesend\" ist nicht aktiv.");
@@ -847,18 +939,20 @@ class Alarmanlage extends IPSModule
         }
 
         if (in_array($id, $active, true)) {
-            $this->onTrigger("Kontakt $name geöffnet", $name);
+            $this->onTrigger("Kontakt $name geöffnet", $name, $this->isEntryRoute('Contacts', $id));
         }
     }
 
-    private function onMotion(string $name, bool $value): void
+    private function onMotion(int $id, bool $value): void
     {
         if (!$value) {
             return;
         }
 
+        $name = $this->motionSensors()[$id];
         $text = "Bewegung $name";
         $state = $this->state();
+        $entry = $this->isEntryRoute('MotionSensors', $id);
 
         switch ($this->mode()) {
             case self::MODE_AWAY:
@@ -868,13 +962,15 @@ class Alarmanlage extends IPSModule
                     $this->WriteAttributeString('TriggerSource', $name);
                     $this->startAlarm(false);
                 } else {
-                    $this->onTrigger($text, $name);
+                    $this->onTrigger($text, $name, $entry);
                 }
                 break;
 
             case self::MODE_NIGHT:
                 // Nachts zählt Bewegung nur nach einer Kontaktöffnung, dann aber sofort voller Alarm
-                if ($state === self::STATE_PREALARM || $state === self::STATE_ALARM) {
+                if ($state === self::STATE_PREALARM && $entry && $this->ReadAttributeBoolean('PreAlarmEntry')) {
+                    $this->log("$text auf dem Eingangsweg, Voralarm läuft weiter.");
+                } elseif ($state === self::STATE_PREALARM || $state === self::STATE_ALARM) {
                     $this->appendTrigger($text);
                     $this->startAlarm(true);
                 } elseif ($state === self::STATE_LATCHED) {
@@ -886,13 +982,18 @@ class Alarmanlage extends IPSModule
         }
     }
 
-    private function onTrigger(string $text, string $source): void
+    private function onTrigger(string $text, string $source, bool $entry = false): void
     {
         switch ($this->state()) {
             case self::STATE_IDLE:
-                $this->startPreAlarm($text, $source);
+                $this->startPreAlarm($text, $source, $entry);
                 break;
             case self::STATE_PREALARM:
+                // Wer über den Eingangsweg hereinkommt, bekommt die volle Eingangsverzögerung
+                if ($entry && $this->ReadAttributeBoolean('PreAlarmEntry')) {
+                    $this->log("$text auf dem Eingangsweg, Voralarm läuft weiter.");
+                    break;
+                }
                 // Ein zweiter, anderer Auslöser bestätigt den Einbruch: Voralarm abbrechen, voller Alarm
                 if (strpos($this->GetValue('Trigger'), $text) === false) {
                     $this->appendTrigger($text);
@@ -915,6 +1016,10 @@ class Alarmanlage extends IPSModule
         if ($this->mode() === $mode) {
             return;
         }
+        if ($this->state() !== self::STATE_IDLE) {
+            $this->log('Schärfen abgelehnt: Alarm aktiv, zuerst unscharf schalten.');
+            return;
+        }
 
         $active = [];
         $pending = [];
@@ -934,6 +1039,8 @@ class Alarmanlage extends IPSModule
         $this->SetValue('Trigger', '');
         $this->updateExcluded();
         $this->updateArmedOutputs();
+
+        $this->updateSimulation();
 
         $label = $mode === self::MODE_AWAY ? 'Abwesend' : 'Nacht';
         $text = "Scharf ($label).";
@@ -966,6 +1073,7 @@ class Alarmanlage extends IPSModule
         $this->SetValue('Trigger', '');
         $this->updateExcluded();
         $this->updateArmedOutputs();
+        $this->updateSimulation();
         $this->refreshDisplay();
         $this->showInfo('Disarmed', 'Unscharf');
 
@@ -1002,12 +1110,13 @@ class Alarmanlage extends IPSModule
 
     // ---------- Alarmstufen ----------
 
-    private function startPreAlarm(string $text, string $source): void
+    private function startPreAlarm(string $text, string $source, bool $entry): void
     {
         $delay = $this->ReadPropertyInteger('EntryDelay');
         $this->SetValue('State', self::STATE_PREALARM);
         $this->SetValue('Trigger', $text);
         $this->WriteAttributeString('TriggerSource', $source);
+        $this->WriteAttributeBoolean('PreAlarmEntry', $entry);
         $this->refreshDisplay();
         $this->switchLights('PreAlarmLights');
         $this->notify('Voralarm', "$text. Alarm in $delay s, wenn nicht unscharf.", 'buzzer');
@@ -1054,6 +1163,180 @@ class Alarmanlage extends IPSModule
         $this->SetValue('State', self::STATE_LATCHED);
         $this->notify('Alarm', 'Sirene abgeschaltet. Anlage bleibt im Alarmzustand, bis unscharf geschaltet wird.');
         $this->showInfo('SirenOff', 'Sirene aus');
+    }
+
+    // ---------- Überfall und Panik ----------
+
+    private function onPanic(string $name): void
+    {
+        if ($this->ReadPropertyBoolean('PanicSilent')) {
+            $this->silentAlarm("Panik-Taster $name ausgelöst.");
+            return;
+        }
+        $this->log("Panik-Taster $name ausgelöst.");
+        if ($this->state() === self::STATE_IDLE || $this->state() === self::STATE_PREALARM) {
+            $this->SetValue('Trigger', "Panik $name");
+            $this->WriteAttributeString('TriggerSource', 'Panik');
+        } else {
+            $this->appendTrigger("Panik $name");
+        }
+        if ($this->state() === self::STATE_LATCHED) {
+            $this->SetValue('State', self::STATE_ALARM);
+        }
+        $this->startAlarm(true);
+    }
+
+    /** Stiller Alarm: keine Sirene, kein Licht, keine Anzeige, nur Benachrichtigung und Ausgänge. */
+    private function silentAlarm(string $reason): void
+    {
+        $this->SetValue('SilentAlarm', true);
+        foreach ($this->listProperty('SilentAlarmOutputs') as $row) {
+            $this->act((int) $row['VariableID'], $row['Value'] ?? 1);
+        }
+
+        $scriptID = $this->ReadPropertyInteger('SilentAlarmScriptID');
+        if ($scriptID > 0 && IPS_ScriptExists($scriptID)) {
+            IPS_RunScriptEx($scriptID, ['ALARM_INSTANCE' => $this->InstanceID, 'ALARM_REASON' => $reason]);
+        }
+
+        $this->LogMessage("STILLER ALARM: $reason", KL_WARNING);
+        $visuID = $this->ReadPropertyInteger('SilentVisuID') ?: $this->ReadPropertyInteger('VisuID');
+        if ($visuID > 0 && IPS_InstanceExists($visuID) && function_exists('VISU_PostNotificationEx')) {
+            @VISU_PostNotificationEx($visuID, 'STILLER ALARM', mb_substr($reason, 0, 256), 'Alert', 'alarm', 0);
+        }
+    }
+
+    // ---------- Erinnerung "Schärfen vergessen" ----------
+
+    private function scheduleReminder(): void
+    {
+        $this->WriteAttributeInteger('ReminderCount', 0);
+        if (!$this->ReadPropertyBoolean('ReminderEnabled')) {
+            $this->SetTimerInterval('ReminderTimer', 0);
+            return;
+        }
+        $this->SetTimerInterval('ReminderTimer', $this->secondsUntil($this->ReadPropertyString('ReminderTime')) * 1000);
+    }
+
+    private function onReminder(): void
+    {
+        $forgotten = $this->mode() === self::MODE_OFF && !$this->isArmPending()
+            && $this->state() === self::STATE_IDLE && $this->anyoneHome();
+        if (!$forgotten) {
+            $this->scheduleReminder();
+            return;
+        }
+
+        $count = $this->ReadAttributeInteger('ReminderCount') + 1;
+        $open = array_filter(array_keys($this->contacts()), fn ($id) => $this->isContactOpen($id));
+        $text = 'Die Alarmanlage ist noch nicht scharf.';
+        if ($open) {
+            $text .= ' Offen: ' . $this->names($open) . '.';
+        }
+        $this->notify('Schärfen vergessen?', $text);
+        $this->showInfo('Reminder', 'Nicht scharf!');
+
+        $repeat = $this->ReadPropertyInteger('ReminderRepeatMinutes');
+        if ($repeat > 0 && $count < $this->ReadPropertyInteger('ReminderMaxCount')) {
+            $this->WriteAttributeInteger('ReminderCount', $count);
+            $this->SetTimerInterval('ReminderTimer', $repeat * 60 * 1000);
+        } else {
+            $this->scheduleReminder();
+        }
+    }
+
+    /** Sekunden bis zur nächsten Uhrzeit aus einem SelectTime-Wert ({"hour":..,"minute":..,"second":..}). */
+    private function secondsUntil(string $time): int
+    {
+        $t = json_decode($time, true) ?: [];
+        $target = mktime((int) ($t['hour'] ?? 0), (int) ($t['minute'] ?? 0), (int) ($t['second'] ?? 0));
+        if ($target <= time()) {
+            $target = strtotime('+1 day', $target);
+        }
+        return $target - time();
+    }
+
+    private function secondsOfDay(string $time): int
+    {
+        $t = json_decode($time, true) ?: [];
+        return (int) ($t['hour'] ?? 0) * 3600 + (int) ($t['minute'] ?? 0) * 60 + (int) ($t['second'] ?? 0);
+    }
+
+    // ---------- Anwesenheitssimulation ----------
+
+    /** Läuft minütlich, solange "Abwesend" scharf ist; schaltet Lichter im Zeitfenster bei Dunkelheit zufällig. */
+    private function updateSimulation(): void
+    {
+        $lights = array_keys($this->namedList('SimLights'));
+        if (!$this->ReadPropertyBoolean('SimEnabled') || !$lights || $this->mode() !== self::MODE_AWAY) {
+            $this->SetTimerInterval('SimTimer', 0);
+            $this->WriteAttributeString('SimState', '{}');
+            return;
+        }
+        $this->SetTimerInterval('SimTimer', 60 * 1000);
+
+        if ($this->state() !== self::STATE_IDLE) {
+            return;
+        }
+        $sim = json_decode($this->ReadAttributeString('SimState'), true) ?: [];
+
+        if (!$this->simulationWindowActive()) {
+            foreach ($sim as $id => [$on]) {
+                if ($on) {
+                    $this->act((int) $id, false);
+                }
+            }
+            if ($sim) {
+                $this->log('Anwesenheitssimulation: Zeitfenster beendet, Lichter aus.');
+            }
+            $this->WriteAttributeString('SimState', '{}');
+            return;
+        }
+
+        $now = time();
+        foreach ($lights as $id) {
+            $key = (string) $id;
+            if (!isset($sim[$key])) {
+                // Gestaffelter Start, damit nicht alle Lichter gleichzeitig angehen
+                $sim[$key] = [false, $now + 60 * random_int(0, max(0, $this->ReadPropertyInteger('SimOffMax')))];
+                continue;
+            }
+            [$on, $next] = $sim[$key];
+            if ($now < $next) {
+                continue;
+            }
+            $on = !$on;
+            $this->act($id, $on);
+            $minutes = $on
+                ? random_int($this->ReadPropertyInteger('SimOnMin'), max($this->ReadPropertyInteger('SimOnMin'), $this->ReadPropertyInteger('SimOnMax')))
+                : random_int($this->ReadPropertyInteger('SimOffMin'), max($this->ReadPropertyInteger('SimOffMin'), $this->ReadPropertyInteger('SimOffMax')));
+            $sim[$key] = [$on, $now + 60 * $minutes];
+            $this->SendDebug('Simulation', IPS_GetName($id) . ($on ? ' an' : ' aus') . " für $minutes min", 0);
+        }
+        $this->WriteAttributeString('SimState', json_encode($sim));
+    }
+
+    private function simulationWindowActive(): bool
+    {
+        $dayID = $this->ReadPropertyInteger('SimDayVariableID');
+        if ($dayID > 0 && IPS_VariableExists($dayID) && GetValue($dayID)) {
+            return false;
+        }
+        $now = (int) date('G') * 3600 + (int) date('i') * 60 + (int) date('s');
+        $start = $this->secondsOfDay($this->ReadPropertyString('SimStartTime'));
+        $end = $this->secondsOfDay($this->ReadPropertyString('SimEndTime'));
+        // Fenster über Mitternacht (z. B. 17:00 bis 01:00) ist erlaubt
+        return $start <= $end ? ($now >= $start && $now < $end) : ($now >= $start || $now < $end);
+    }
+
+    private function isEntryRoute(string $property, int $id): bool
+    {
+        foreach ($this->listProperty($property) as $row) {
+            if ((int) ($row['VariableID'] ?? 0) === $id) {
+                return (bool) ($row['EntryRoute'] ?? false);
+            }
+        }
+        return false;
     }
 
     // ---------- Aktoren ----------
@@ -1273,13 +1556,17 @@ class Alarmanlage extends IPSModule
         return array_values(array_filter($ids, fn ($id) => $id > 0));
     }
 
-    private function matchEkeyUser(int $user, int $finger): ?string
+    /** @return array{name: string, duress: bool}|null */
+    private function matchEkeyUser(int $user, int $finger): ?array
     {
-        foreach ($this->listProperty('EkeyUsers') as $row) {
+        // Ein exakt eingetragener Finger hat Vorrang vor "jeder Finger", damit ein Überfall-Finger greift
+        $rows = $this->listProperty('EkeyUsers');
+        usort($rows, fn ($a, $b) => ((int) ($a['FingerID'] ?? -1) < 0) <=> ((int) ($b['FingerID'] ?? -1) < 0));
+        foreach ($rows as $row) {
             $rowFinger = (int) ($row['FingerID'] ?? -1);
             if ((int) ($row['UserID'] ?? -1) === $user && ($rowFinger < 0 || $rowFinger === $finger)) {
                 $name = trim((string) ($row['Name'] ?? ''));
-                return $name !== '' ? $name : "Benutzer $user";
+                return ['name' => $name !== '' ? $name : "Benutzer $user", 'duress' => (bool) ($row['Duress'] ?? false)];
             }
         }
         return null;
@@ -1297,7 +1584,8 @@ class Alarmanlage extends IPSModule
                 $ids[] = (int) ($row['BrightnessVariableID'] ?? 0);
             }
         }
-        foreach (['Shutters', 'TextOutputs', 'CountdownOutputs', 'ArmedOutputs'] as $property) {
+        $ids[] = $this->ReadPropertyInteger('SimDayVariableID');
+        foreach (['Shutters', 'TextOutputs', 'CountdownOutputs', 'ArmedOutputs', 'SilentAlarmOutputs', 'SimLights'] as $property) {
             foreach ($this->listProperty($property) as $row) {
                 $ids[] = (int) $row['VariableID'];
             }
