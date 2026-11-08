@@ -894,5 +894,22 @@ $m->RequestAction('SignalElapsed', 0);
 check('Nach dem Signal: Bewegungslicht 100 %, weiß', $m->timers['SignalTimer'] === 0 && Sim::$vars[3011]['value'] === true
     && Sim::$vars[3013]['value'] === 100 && Sim::$vars[3012]['value'] === 0xFFFFFF);
 
+echo "Konfigurationsformular\n";
+$form = json_decode(file_get_contents(__DIR__ . '/../Alarmanlage/form.json'), true);
+check('form.json ist gültiges JSON', is_array($form));
+$names = [];
+$collect = function (array $items) use (&$collect, &$names) {
+    foreach ($items as $item) {
+        if (isset($item['name'])) {
+            $names[] = $item['name'];
+        }
+        $collect($item['items'] ?? []);
+    }
+};
+$collect($form['elements']);
+check('Keine doppelten Feldnamen', count($names) === count(array_unique($names)));
+$m = setup();
+check('Jede Eigenschaft hat ein Feld und umgekehrt', array_diff(array_keys($m->properties), $names) === [] && array_diff($names, array_keys($m->properties)) === []);
+
 echo $failures === 0 ? "\nAlle Tests bestanden.\n" : "\n$failures Test(s) fehlgeschlagen.\n";
 exit($failures === 0 ? 0 : 1);

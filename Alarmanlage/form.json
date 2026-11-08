@@ -373,13 +373,6 @@
                     "minimum": 250
                 },
                 {
-                    "type": "NumberSpinner",
-                    "name": "PreAlarmBlinkInterval",
-                    "caption": "Blinktakt je Phase an/aus (1000 ms = 0,5 Hz)",
-                    "suffix": "ms",
-                    "minimum": 250
-                },
-                {
                     "type": "List",
                     "name": "Shutters",
                     "caption": "Rollläden / Jalousien bei Alarm öffnen",
