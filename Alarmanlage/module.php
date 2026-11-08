@@ -27,6 +27,12 @@ class Alarmanlage extends IPSModule
     private const HOMEKIT_OWN = 1;
     private const HOMEKIT_EXTERNAL = 2;
 
+    /** So lange gilt eine Aktualisierung mit dem zuletzt geschriebenen Wert als Echo und nicht als Befehl. */
+    private const HOMEKIT_ECHO_SECONDS = 3;
+
+    /** Nur bei diesen Ereignistypen ist schnelles Wechseln ein Hinweis auf einen unzuverlässigen Sensor. */
+    private const FLAP_TYPES = ['Kontakt', 'Bewegung', 'Anwesenheit'];
+
     private const TEST_LOG_MAX = 200;
 
     /** Anmerkung zu einem ekey-Scan für das Testprotokoll, gesetzt während der Auswertung */
@@ -355,9 +361,14 @@ class Alarmanlage extends IPSModule
     private function dispatchVariable(int $id, $value, bool $changed): void
     {
         if ($id === $this->externalHomeKitID()) {
-            if ($changed && !$this->isOwnHomeKitWrite((int) $value)) {
-                $this->onHomeKit((int) $value);
+            if (!$changed) {
+                return;
             }
+            if ($this->isOwnHomeKitWrite((int) $value)) {
+                $this->SendDebug('HomeKit', "Echo des eigenen Schreibvorgangs ($value) ignoriert.", 0);
+                return;
+            }
+            $this->onHomeKit((int) $value);
             return;
         }
         if ($id === $this->ReadPropertyInteger('ArmRequestVariableID')) {
@@ -499,35 +510,62 @@ class Alarmanlage extends IPSModule
     private function onHomeKit(int $value): void
     {
         $mode = $this->mode();
+        $canLeaveAway = $this->ReadPropertyBoolean('HomeKitCanDisarmAway');
+        $label = ['Zuhause', 'Abwesend', 'Nacht', 'Aus'][$value] ?? (string) $value;
+        $this->log("HomeKit: \"$label\" angefordert.");
+
         switch ($value) {
             case self::HK_OFF:
-                if ($mode === self::MODE_NIGHT || ($mode === self::MODE_AWAY && $this->ReadPropertyBoolean('HomeKitCanDisarmAway'))) {
+                if ($mode === self::MODE_NIGHT || ($mode === self::MODE_AWAY && $canLeaveAway)) {
                     $this->doDisarm('Über HomeKit unscharf geschaltet.');
                 } elseif ($mode === self::MODE_AWAY) {
-                    $this->log('HomeKit "Aus" ignoriert: "Abwesend" darf über HomeKit nicht unscharf geschaltet werden.');
+                    $this->rejectHomeKit($label, '"Abwesend" darf über HomeKit nicht unscharf geschaltet werden (Formular: HomeKit "Aus" darf auch "Abwesend" unscharf schalten).');
                 } elseif ($this->isArmPending()) {
                     $this->cancelPendingArm('Über HomeKit abgebrochen.');
                 }
                 break;
 
             case self::HK_HOME:
-                if ($this->ReadPropertyInteger('HomeKitHomeAs') !== self::HK_NIGHT) {
-                    $this->log('HomeKit "Zuhause" ignoriert (nicht zugeordnet).');
+            case self::HK_NIGHT:
+                if ($value === self::HK_HOME && $this->ReadPropertyInteger('HomeKitHomeAs') !== self::HK_NIGHT) {
+                    $this->rejectHomeKit($label, '"Zuhause" ist im Formular auf "Ignorieren" gestellt.');
                     break;
                 }
-                $this->WriteAttributeBoolean('HomeKitHome', true);
-                $this->requestArmNight();
-                break;
-
-            case self::HK_NIGHT:
-                $this->WriteAttributeBoolean('HomeKitHome', false);
-                $this->requestArmNight();
+                if ($mode === self::MODE_AWAY) {
+                    if (!$canLeaveAway) {
+                        $this->rejectHomeKit($label, 'Wechsel von "Abwesend" nur erlaubt, wenn HomeKit "Abwesend" unscharf schalten darf.');
+                        break;
+                    }
+                    if ($this->state() !== self::STATE_IDLE) {
+                        $this->rejectHomeKit($label, 'Alarm aktiv, zuerst "Aus" wählen.');
+                        break;
+                    }
+                }
+                $this->WriteAttributeBoolean('HomeKitHome', $value === self::HK_HOME);
+                if ($mode === self::MODE_AWAY) {
+                    $this->doArm(self::MODE_NIGHT);
+                } else {
+                    $this->requestArmNight();
+                }
                 break;
 
             case self::HK_AWAY:
+                if ($mode !== self::MODE_AWAY && $this->state() !== self::STATE_IDLE) {
+                    $this->rejectHomeKit($label, 'Alarm aktiv, zuerst "Aus" wählen.');
+                    break;
+                }
                 $this->requestArmAwayManual();
                 break;
+
+            default:
+                $this->rejectHomeKit($label, 'Unbekannter Wert.');
         }
+    }
+
+    /** HomeKit zeigt danach wieder den tatsächlichen Zustand an, der Grund steht im Log. */
+    private function rejectHomeKit(string $label, string $reason): void
+    {
+        $this->log("HomeKit: \"$label\" abgelehnt. $reason");
     }
 
     private function homeKitValue(): int
@@ -569,7 +607,7 @@ class Alarmanlage extends IPSModule
                 if ($id <= 0 || !IPS_VariableExists($id) || GetValue($id) === $value) {
                     break;
                 }
-                $writes = array_filter(json_decode($this->ReadAttributeString('HomeKitWrites'), true) ?: [], fn ($w) => $w[1] > time() - 10);
+                $writes = array_filter(json_decode($this->ReadAttributeString('HomeKitWrites'), true) ?: [], fn ($w) => $w[1] > time() - self::HOMEKIT_ECHO_SECONDS);
                 $writes[] = [$value, time()];
                 $this->WriteAttributeString('HomeKitWrites', json_encode(array_values($writes)));
                 if (IPS_GetVariable($id)['VariableAction'] > 0) {
@@ -585,7 +623,7 @@ class Alarmanlage extends IPSModule
     private function isOwnHomeKitWrite(int $value): bool
     {
         foreach (json_decode($this->ReadAttributeString('HomeKitWrites'), true) ?: [] as [$written, $time]) {
-            if ($written === $value && $time > time() - 10) {
+            if ($written === $value && $time > time() - self::HOMEKIT_ECHO_SECONDS) {
                 return true;
             }
         }
@@ -637,7 +675,8 @@ class Alarmanlage extends IPSModule
         $log = $this->testLog();
         $key = (string) $id;
         $sensor = $log['sensors'][$key] ?? ['type' => $type, 'name' => $name, 'events' => 0, 'triggers' => 0, 'flaps' => 0, 'last' => 0];
-        $flap = $sensor['last'] > 0 && $now - $sensor['last'] < $this->ReadPropertyInteger('TestFlapSeconds');
+        $flap = in_array($type, self::FLAP_TYPES, true)
+            && $sensor['last'] > 0 && $now - $sensor['last'] < $this->ReadPropertyInteger('TestFlapSeconds');
         $sensor['name'] = $name;
         $sensor['events']++;
         $sensor['triggers'] += $wouldTrigger ? 1 : 0;

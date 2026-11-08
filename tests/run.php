@@ -475,6 +475,46 @@ Sim::update(REQUEST, false);
 Sim::update(1101, 2);
 check('Verspätetes Echo (2) schärft nicht erneut und wird korrigiert', mode($m) === 0 && Sim::$vars[1101]['value'] === 3);
 
+echo "HomeKit: Zurückspringen\n";
+$m = setup();
+$m->properties['HomeKitSource'] = 1;
+$m->ApplyChanges();
+$m->RequestAction('HomeKit', 1);
+$m->RequestAction('HomeKit', 2);
+check('Abwesend → Nacht über HomeKit möglich', mode($m) === 2 && $m->values['HomeKit'] === 2);
+$m->RequestAction('HomeKit', 1);
+$m->RequestAction('HomeKit', 0);
+check('Abwesend → Zuhause über HomeKit möglich', mode($m) === 2 && $m->values['HomeKit'] === 0);
+$m->properties['HomeKitCanDisarmAway'] = false;
+$m->RequestAction('HomeKit', 1);
+$m->log = [];
+$m->RequestAction('HomeKit', 2);
+check('Gesperrt: bleibt Abwesend, Grund im Log', mode($m) === 1 && $m->values['HomeKit'] === 1
+    && (bool) preg_grep('/"Nacht" abgelehnt/', $m->log));
+
+$m = setup();
+Sim::addVar(1101, 'HomeKit Alarm', VARIABLETYPE_INTEGER, 3);
+$m->properties['HomeKitSource'] = 2;
+$m->properties['HomeKitVariableID'] = 1101;
+$m->ApplyChanges();
+Sim::update(REQUEST, true);
+Sim::update(REQUEST, false);
+$m->attributes['HomeKitWrites'] = json_encode(array_map(fn ($w) => [$w[0], $w[1] - 4], json_decode($m->attributes['HomeKitWrites'], true)));
+Sim::update(1101, 2);
+check('Echter Befehl nach Ablauf des Echo-Fensters wird ausgeführt', mode($m) === 2);
+
+$m = setup();
+$m->properties['TestMode'] = true;
+$m->properties['HomeKitSource'] = 2;
+$m->properties['HomeKitVariableID'] = 1101;
+Sim::addVar(1101, 'HomeKit Alarm', VARIABLETYPE_INTEGER, 3);
+$m->ApplyChanges();
+$m->ResetTestLog();
+Sim::update(1101, 2);
+Sim::update(1101, 3);
+$log = json_decode($m->attributes['TestLog'], true);
+check('Schnelle HomeKit-Wechsel zählen nicht als Flattern', $log['sensors']['1101']['flaps'] === 0 && $log['sensors']['1101']['events'] === 2);
+
 echo "Testprotokoll\n";
 $m = setup();
 $m->properties['TestMode'] = true;
