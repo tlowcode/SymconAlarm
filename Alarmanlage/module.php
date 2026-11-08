@@ -862,7 +862,14 @@ class Alarmanlage extends IPSModule
 
         switch ($this->mode()) {
             case self::MODE_AWAY:
-                $this->onTrigger($text, $name);
+                // Voralarm gibt es nur für Kontakte; Bewegung im leeren Haus ist sofort Alarm
+                if ($state === self::STATE_IDLE) {
+                    $this->SetValue('Trigger', $text);
+                    $this->WriteAttributeString('TriggerSource', $name);
+                    $this->startAlarm(false);
+                } else {
+                    $this->onTrigger($text, $name);
+                }
                 break;
 
             case self::MODE_NIGHT:
